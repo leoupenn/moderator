@@ -10,7 +10,7 @@ A browser version lives under [`web/`](web/) (Vite + React + TypeScript) with a 
 
 Route **`/solo`** (also **Singleplayer** on the home page): client-only practice. Presets are defined in [`web/src/solo/presets.ts`](web/src/solo/presets.ts); each has a **BPM**, a **constrained 16-step pattern** (for grading), and an optional **`audioPath`** under [`web/public/solo/`](web/public/solo/) for a **reference clip** (decoded in the browser). **Start challenge** begins the timer; each **Submit for grading** counts as an attempt until you match. Best **attempt count** (then fastest time) per preset is stored in **`localStorage`**.
 
-**You are responsible for licensing** any commercial audio you add under `public/solo/`. Replace the placeholder preset with your own files and patterns when ready.
+**You are responsible for licensing** any commercial audio you add under `public/solo/`. The default preset uses **`public/solo/WWRY.mp3`**; set **`bpm`** and **`pattern`** in `presets.ts` to match your loop.
 
 **Run locally (one machine)**
 

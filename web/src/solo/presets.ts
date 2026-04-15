@@ -19,28 +19,26 @@ export type SoloPreset = {
   mixMetronomeDuringSample?: boolean;
 };
 
-const placeholderSegments: Segment[] = [
-  { type: "note", durationEighths: 1 },
-  { type: "rest" },
-  { type: "rest" },
-  { type: "rest" },
-  { type: "rest" },
-  { type: "rest" },
+/** One bar: quarter, quarter, quarter, quarter rest (two eighth rests). */
+const singleplayerBarSegments: Segment[] = [
+  { type: "note", durationEighths: 2 },
+  { type: "note", durationEighths: 2 },
+  { type: "note", durationEighths: 2 },
   { type: "rest" },
   { type: "rest" },
 ];
 
-const PLACEHOLDER_PATTERN = encodeConstrainedPattern(placeholderSegments);
+const SINGLEPLAYER_PATTERN = encodeConstrainedPattern(singleplayerBarSegments);
 
 export const SOLO_PRESETS: SoloPreset[] = [
   {
-    id: "placeholder",
-    title: "Placeholder groove",
+    id: "singleplayer",
+    title: "Singleplayer",
     description:
-      "One eighth note then rests — swap audioPath and pattern when you add a real preset.",
-    bpm: 88,
-    pattern: PLACEHOLDER_PATTERN,
-    audioPath: "",
+      "Reference clip: WWRY.mp3. Tune bpm in presets.ts if the metronome drifts from your loop.",
+    bpm: 81,
+    pattern: SINGLEPLAYER_PATTERN,
+    audioPath: "/solo/WWRY.mp3",
     mixMetronomeDuringSample: true,
   },
 ];
