@@ -1,0 +1,14 @@
+.git
+**/node_modules
+web/dist
+server/dist
+dist
+build
+__pycache__
+*.pyc
+.venv
+venv
+.env
+.env.*
+*.tsbuildinfo
+.DS_Store
