@@ -1,0 +1,103 @@
+:root {
+  font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+  line-height: 1.45;
+  color: #e8e6e3;
+  background: #121218;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  border-radius: 8px;
+  padding: 0.55rem 1rem;
+  background: #2d3142;
+  color: #e8e6e3;
+}
+
+button:hover:not(:disabled) {
+  background: #3d4258;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: #1e5f4c;
+}
+
+button.primary:hover:not(:disabled) {
+  background: #2a7a62;
+}
+
+button.danger {
+  background: #5f2d3a;
+}
+
+input[type="number"],
+input[type="text"] {
+  font-family: inherit;
+  padding: 0.45rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid #3d4258;
+  background: #1a1a22;
+  color: #e8e6e3;
+  width: 5rem;
+}
+
+h1 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+
+h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 1rem 0 0.5rem;
+  color: #9aa0b4;
+}
+
+.muted {
+  color: #7a8199;
+  font-size: 0.85rem;
+}
+
+.card {
+  background: #1a1a24;
+  border: 1px solid #2a2a36;
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.mt {
+  margin-top: 0.75rem;
+}
+
+.mb {
+  margin-bottom: 0.75rem;
+}

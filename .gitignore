@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Builds
+web/dist/
+server/dist/
+dist/
+build/
+
+# TypeScript incremental
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Env
+.env
+.env.*.local
