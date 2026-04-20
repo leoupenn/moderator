@@ -3,15 +3,13 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
-    QFrame,
-    QGraphicsScene,
-    QGraphicsView,
+    QHBoxLayout,
     QMainWindow,
     QMessageBox,
+    QScrollArea,
     QStackedWidget,
     QWidget,
 )
@@ -65,49 +63,6 @@ from .ui.pages import (
 from .ui.settings_dialog import SettingsDialog
 
 
-class _DesignScaleView(QGraphicsView):
-    """Scales the fixed Figma canvas (``DESIGN_W``×``DESIGN_H``) to the viewport.
-
-    Pages stay at design pixel coordinates; this view uniformly scales them so
-    the whole window is used without scrollbars (letterboxing uses ``THEME.bg``).
-    """
-
-    def __init__(
-        self, stack: QStackedWidget, *, design_w: int, design_h: int, bg: str, parent: QWidget | None = None
-    ) -> None:
-        super().__init__(parent)
-        self._dw = design_w
-        self._dh = design_h
-        scene = QGraphicsScene(self)
-        self.setScene(scene)
-        scene.addWidget(stack)
-        stack.setFixedSize(self._dw, self._dh)
-        self.setSceneRect(QRectF(0, 0, self._dw, self._dh))
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setDragMode(QGraphicsView.DragMode.NoDrag)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setBackgroundBrush(QBrush(QColor(bg)))
-
-    def _apply_fit(self) -> None:
-        vp = self.viewport()
-        if vp.width() <= 0 or vp.height() <= 0:
-            return
-        self.fitInView(
-            QRectF(0, 0, self._dw, self._dh),
-            Qt.AspectRatioMode.KeepAspectRatio,
-        )
-
-    def resizeEvent(self, event) -> None:  # noqa: D401
-        super().resizeEvent(event)
-        self._apply_fit()
-
-    def showEvent(self, event) -> None:  # noqa: D401
-        super().showEvent(event)
-        self._apply_fit()
-
-
 class MainWindow(QMainWindow):
     """Hosts the page stack, game session, and help-chip settings drawer."""
 
@@ -119,8 +74,7 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(load_app_stylesheet())
-        # Small floor only — the scaled stage handles tiny viewports.
-        self.setMinimumSize(640, 480)
+        self.setMinimumSize(1280, 800)
         self.resize(DESIGN_W, DESIGN_H)
 
         self._flow = FlowState()
@@ -130,10 +84,27 @@ class MainWindow(QMainWindow):
         # when the client mirrors a host-driven navigation.
         self._applying_remote_nav = False
 
+        # Wrap the 1512×982 design canvas in a scroll area so smaller screens
+        # still get the full fidelity Figma layout.
         self._stack = QStackedWidget()
-        self.setCentralWidget(
-            _DesignScaleView(self._stack, design_w=DESIGN_W, design_h=DESIGN_H, bg=THEME.bg)
-        )
+        self._stack.setFixedSize(DESIGN_W, DESIGN_H)
+
+        stage_host = QWidget()
+        stage_host.setObjectName("StageHost")
+        stage_host.setStyleSheet(f"#StageHost {{ background: {THEME.bg}; }}")
+        stage_layout = QHBoxLayout(stage_host)
+        stage_layout.setContentsMargins(0, 0, 0, 0)
+        stage_layout.addStretch(1)
+        stage_layout.addWidget(self._stack)
+        stage_layout.addStretch(1)
+
+        scroller = QScrollArea()
+        scroller.setWidget(stage_host)
+        scroller.setWidgetResizable(True)
+        scroller.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        scroller.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroller.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setCentralWidget(scroller)
 
         self._nav = AppNavigator(self._stack, self)
         self._nav.route_changed.connect(self._on_route_changed)
