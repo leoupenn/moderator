@@ -5,7 +5,8 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from ...session import FlowState, GameMode
+from ...net import MSG_REQUEST_NAV
+from ...session import FlowState, GameMode, MultiplayerMode, NetworkRole
 from ...session.flow_state import RoundScore
 from ..theme import DESIGN_W, THEME
 from ..widgets import ChoiceButton, ChoiceStyle, DuckMascot, FlowPage
@@ -145,8 +146,27 @@ class ResultsPage(FlowPage):
             self._p2_duck.setVisible(True)
 
     def _on_continue(self) -> None:
+        if self.flow.network_role == NetworkRole.CLIENT and self.flow.mode == GameMode.MULTI:
+            mw = self._main_window()
+            if mw is None:
+                return
+            last = self.flow.current_round >= self.flow.rounds_total
+            if last:
+                route = "leaderboard"
+            elif self.flow.multiplayer_mode == MultiplayerMode.RECREATE_RHYTHM:
+                route = "rr_p1"
+            else:
+                route = "time_challenge"
+            mw.net.send(MSG_REQUEST_NAV, route=route)
+            return
         if self.flow.current_round >= self.flow.rounds_total:
             self.finished.emit()
         else:
             self.flow.current_round += 1
             self.next_round.emit()
+
+    def _main_window(self):
+        w = self.parentWidget()
+        while w is not None and not hasattr(w, "net"):
+            w = w.parentWidget()
+        return w

@@ -93,6 +93,20 @@ MSG_CHARACTER_SELECT = "character_select"
 #   {"type":"ready","from_player":2,"screen":"char_p2"}
 MSG_READY = "ready"
 
+# C -> H: client picked a Time Challenge difficulty on the shared Levels screen.
+# Host applies ``level`` + BPM and navigates (same as a local pick).
+#   {"type":"select_level","level":"EASY"|"NORMAL"|"EXPERT"}
+MSG_SELECT_LEVEL = "select_level"
+
+# C -> H: client pressed Continue on Results (next round or leaderboard). Host
+# validates the requested ``route`` against the current match state.
+#   {"type":"request_nav","route":"time_challenge"|"rr_p1"|"leaderboard"}
+MSG_REQUEST_NAV = "request_nav"
+
+# C -> H: client used Skip / Next round or Play target on Time Challenge.
+#   {"type":"time_challenge_control","action":"force_next_round"|"play_reference"}
+MSG_TIME_CHALLENGE_CONTROL = "time_challenge_control"
+
 
 # ---------- encode / decode -------------------------------------------------
 def encode_message(msg_type: str, **fields) -> bytes:

@@ -5,7 +5,8 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from ...session import FlowState
+from ...net import MSG_SELECT_LEVEL
+from ...session import FlowState, GameMode, NetworkRole
 from ...session.flow_state import LevelTier
 from ..theme import THEME
 from ..widgets import ChoiceButton, ChoiceStyle, FlowPage
@@ -113,7 +114,21 @@ class LevelsPage(FlowPage):
         return card, btn
 
     def _pick(self, tier: LevelTier) -> None:
+        if (
+            self.flow.network_role == NetworkRole.CLIENT
+            and self.flow.mode == GameMode.MULTI
+        ):
+            mw = self._main_window()
+            if mw is not None:
+                mw.net.send(MSG_SELECT_LEVEL, level=tier.name)
+            return
         self.flow.level = tier
         tempo = {LevelTier.EASY: 60, LevelTier.NORMAL: 80, LevelTier.EXPERT: 110}[tier]
         self.flow.bpm = tempo
         self.selected.emit(tier)
+
+    def _main_window(self):
+        w = self.parentWidget()
+        while w is not None and not hasattr(w, "net"):
+            w = w.parentWidget()
+        return w

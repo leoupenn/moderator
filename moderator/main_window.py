@@ -23,16 +23,19 @@ from .net import (
     MSG_NAV,
     MSG_PLAY_REFERENCE,
     MSG_READY,
+    MSG_REQUEST_NAV,
     MSG_ROUND_RESULT,
+    MSG_SELECT_LEVEL,
     MSG_START_ROUND,
     MSG_STATE,
     MSG_SUBMIT,
+    MSG_TIME_CHALLENGE_CONTROL,
     MSG_WELCOME,
     NetworkManager,
     PROTOCOL_VERSION,
 )
 from .session import FlowState, GameMode, GameSession, MultiplayerMode, NetworkRole
-from .session.flow_state import Character
+from .session.flow_state import Character, LevelTier
 from .ui import AppNavigator, DESIGN_H, DESIGN_W, FIGMA_FILE_URL, load_app_stylesheet
 from .ui.theme import THEME
 from .ui.pages import (
@@ -263,7 +266,17 @@ class MainWindow(QMainWindow):
         else:
             self._nav.go("levels")
 
-    def _on_level_selected(self, _tier) -> None:
+    def _on_level_selected(self, tier: LevelTier) -> None:
+        self._apply_level_tier(tier)
+
+    def _apply_level_tier(self, tier: LevelTier) -> None:
+        """Set level + BPM from a Levels pick (host UI or client ``select_level``)."""
+        self._flow.level = tier
+        self._flow.bpm = {
+            LevelTier.EASY: 60,
+            LevelTier.NORMAL: 80,
+            LevelTier.EXPERT: 110,
+        }[tier]
         if self._flow.mode == GameMode.MULTI and self._flow.multiplayer_mode == MultiplayerMode.RECREATE_RHYTHM:
             self._nav.go("rr_p1")
         else:
@@ -337,6 +350,33 @@ class MainWindow(QMainWindow):
             if from_player == 2 and screen == "char_p2":
                 self._nav.go("rounds")
             return
+        if kind == MSG_SELECT_LEVEL and self._flow.network_role == NetworkRole.HOST:
+            if self._nav.current() != "levels":
+                return
+            name = msg.get("level")
+            if not isinstance(name, str):
+                return
+            try:
+                tier = LevelTier[name]
+            except KeyError:
+                return
+            self._apply_level_tier(tier)
+            return
+        if kind == MSG_REQUEST_NAV and self._flow.network_role == NetworkRole.HOST:
+            self._handle_client_request_nav(msg)
+            return
+        if kind == MSG_TIME_CHALLENGE_CONTROL and self._flow.network_role == NetworkRole.HOST:
+            if self._nav.current() != "time_challenge":
+                return
+            tc = self._nav.get("time_challenge")
+            if tc is None:
+                return
+            action = msg.get("action")
+            if action == "force_next_round" and hasattr(tc, "host_apply_force_finish"):
+                tc.host_apply_force_finish()
+            elif action == "play_reference" and hasattr(tc, "host_apply_play_reference"):
+                tc.host_apply_play_reference()
+            return
         # Time Challenge game messages — delegated to the page if present.
         if kind in (
             MSG_START_ROUND,
@@ -390,6 +430,35 @@ class MainWindow(QMainWindow):
             self._net.send(
                 MSG_STATE, route=cur, flow=self._flow.to_snapshot()
             )
+
+    def _handle_client_request_nav(self, msg: dict) -> None:
+        """Apply a results-screen Continue from Player 2's machine."""
+        if self._flow.mode != GameMode.MULTI:
+            return
+        route = msg.get("route")
+        if not isinstance(route, str):
+            return
+        if self._nav.current() != "results":
+            return
+        allowed = {"leaderboard", "time_challenge", "rr_p1"}
+        if route not in allowed:
+            return
+        last = self._flow.current_round >= self._flow.rounds_total
+        if route == "leaderboard":
+            if not last:
+                return
+            self._nav.go("leaderboard")
+            return
+        if last:
+            return
+        if route == "time_challenge":
+            if self._flow.multiplayer_mode != MultiplayerMode.TIME_CHALLENGE:
+                return
+        elif route == "rr_p1":
+            if self._flow.multiplayer_mode != MultiplayerMode.RECREATE_RHYTHM:
+                return
+        self._flow.current_round += 1
+        self._nav.go(route)
 
     def _apply_remote_nav(self, route: str) -> None:
         self._applying_remote_nav = True

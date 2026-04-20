@@ -12,6 +12,8 @@ networked match:
   for P2.
 - Client renders the host's state. It runs P2 locally (reading its own
   controller) and pushes submits + live pattern updates back to the host.
+  Skip / Play target also work on the client: they send control messages
+  the host executes authoritatively.
 
 The shared clock is a host-issued ``start_epoch_ms``. The host anchors
 against its own ``time.time()``; the client translates the host's epoch into
@@ -38,6 +40,7 @@ from ...net import (
     MSG_ROUND_RESULT,
     MSG_START_ROUND,
     MSG_SUBMIT,
+    MSG_TIME_CHALLENGE_CONTROL,
 )
 from ...session import FlowState, GameMode, GameSession, NetworkRole
 from ...session.flow_state import LevelTier, RoundScore
@@ -214,7 +217,7 @@ class TimeChallengePage(FlowPage):
         skip_btn = ChoiceButton("Skip / Next round", ChoiceStyle.BLUE, width=320, height=64, parent=self)
         skip_btn.setFont(pf)
         skip_btn.move(979, 870)
-        skip_btn.clicked.connect(self._force_finish_round)
+        skip_btn.clicked.connect(self._on_skip_clicked)
         self._next_btn = skip_btn
 
         # Round state. Timings stored in ms. ``elapsed_ms_local_pN`` is what
@@ -252,10 +255,10 @@ class TimeChallengePage(FlowPage):
         self.setFocus(Qt.FocusReason.OtherFocusReason)
 
         role = self.flow.network_role
-        # Hide the host-only "Skip / Next round" button for the client; host is
-        # the sole authority on ending a round.
-        self._next_btn.setVisible(role != NetworkRole.CLIENT)
-        self._play_btn.setVisible(role != NetworkRole.CLIENT)
+        # Both machines show Play / Skip; the client asks the host to perform
+        # the authoritative action over the wire.
+        self._next_btn.setVisible(True)
+        self._play_btn.setVisible(True)
 
         if role == NetworkRole.CLIENT:
             # Clients wait for the host to push ``start_round`` before their
@@ -371,7 +374,7 @@ class TimeChallengePage(FlowPage):
             elif role == NetworkRole.HOST:
                 self._submit_for(2)
         elif key == Qt.Key.Key_Space:
-            if role in (NetworkRole.SOLO, NetworkRole.HOST):
+            if role in (NetworkRole.SOLO, NetworkRole.HOST, NetworkRole.CLIENT):
                 self._on_play_clicked()
         else:
             super().keyPressEvent(event)
@@ -497,11 +500,16 @@ class TimeChallengePage(FlowPage):
             )
         self.flow.scores.append(score)
 
+    def _on_skip_clicked(self) -> None:
+        if self.flow.network_role == NetworkRole.CLIENT:
+            mw = self._main_window()
+            if mw is not None:
+                mw.net.send(MSG_TIME_CHALLENGE_CONTROL, action="force_next_round")
+            return
+        self._force_finish_round()
+
     def _force_finish_round(self) -> None:
         if self._round_locked:
-            return
-        if self.flow.network_role == NetworkRole.CLIENT:
-            # Clients don't force-end; host is authoritative.
             return
         if self._p1_done and (self.flow.mode == GameMode.SINGLE or self._p2_done):
             return
@@ -515,11 +523,23 @@ class TimeChallengePage(FlowPage):
 
     # ----- reference audio -------------------------------------------------
     def _on_play_clicked(self) -> None:
-        self._session.play_reference()
-        if self.flow.network_role == NetworkRole.HOST:
+        if self.flow.network_role == NetworkRole.CLIENT:
             mw = self._main_window()
             if mw is not None:
-                mw.net.send(MSG_PLAY_REFERENCE)
+                mw.net.send(MSG_TIME_CHALLENGE_CONTROL, action="play_reference")
+            return
+        self.host_apply_play_reference()
+
+    def host_apply_play_reference(self) -> None:
+        """Host-only: play audio locally and tell the client to do the same."""
+        self._session.play_reference()
+        mw = self._main_window()
+        if mw is not None:
+            mw.net.send(MSG_PLAY_REFERENCE)
+
+    def host_apply_force_finish(self) -> None:
+        """Host-only: force-end invoked from the network (P2's Skip button)."""
+        self._force_finish_round()
 
     # ----- session signal plumbing -----------------------------------------
     def _on_live_pattern(self, pattern: list) -> None:
