@@ -16,10 +16,12 @@ from PySide6.QtWidgets import (
 
 from .net import (
     MSG_ABORT_TO_HOME,
+    MSG_CHARACTER_SELECT,
     MSG_HELLO,
     MSG_INPUT_PATTERN,
     MSG_NAV,
     MSG_PLAY_REFERENCE,
+    MSG_READY,
     MSG_ROUND_RESULT,
     MSG_START_ROUND,
     MSG_STATE,
@@ -29,6 +31,7 @@ from .net import (
     PROTOCOL_VERSION,
 )
 from .session import FlowState, GameMode, GameSession, MultiplayerMode, NetworkRole
+from .session.flow_state import Character
 from .ui import AppNavigator, DESIGN_H, DESIGN_W, FIGMA_FILE_URL, load_app_stylesheet
 from .ui.theme import THEME
 from .ui.pages import (
@@ -321,6 +324,18 @@ class MainWindow(QMainWindow):
             self._flow.reset_all()
             self._apply_remote_nav("welcome")
             return
+        if kind == MSG_CHARACTER_SELECT:
+            self._apply_character_select(msg)
+            return
+        if kind == MSG_READY and self._flow.network_role == NetworkRole.HOST:
+            from_player = int(msg.get("from_player", 0))
+            screen = msg.get("screen")
+            # Today the only READY the host listens for is Player 2 confirming
+            # their duck on the ``char_p2`` screen. Advancing here also pushes
+            # a MSG_NAV to the client via ``_on_route_changed``.
+            if from_player == 2 and screen == "char_p2":
+                self._nav.go("rounds")
+            return
         # Time Challenge game messages — delegated to the page if present.
         if kind in (
             MSG_START_ROUND,
@@ -333,6 +348,46 @@ class MainWindow(QMainWindow):
             if tc is not None and hasattr(tc, "handle_network_message"):
                 tc.handle_network_message(msg)
             return
+
+    def _apply_character_select(self, msg: dict) -> None:
+        """Mirror a peer's live character hover into ``flow`` and refresh UI.
+
+        Bidirectional:
+        - ``host -> client``: live preview of P1's current hover.
+        - ``client -> host``: live preview of P2's current hover. After we
+          update the flow, rebroadcast the full state snapshot so the
+          client's copy stays consistent with ours.
+        """
+        try:
+            player = int(msg.get("player", 0))
+        except (TypeError, ValueError):
+            return
+        char_name = msg.get("character")
+        try:
+            character = Character[char_name] if isinstance(char_name, str) else None
+        except KeyError:
+            character = None
+        if character is None or player not in (1, 2):
+            return
+        if player == 1:
+            self._flow.character_p1 = character
+        else:
+            self._flow.character_p2 = character
+
+        # Refresh whichever picker is currently on screen so the preview
+        # actually redraws without waiting for a nav transition.
+        cur = self._nav.current() or ""
+        page = self._nav.get(cur)
+        if page is not None and hasattr(page, "apply_remote_selection"):
+            page.apply_remote_selection()
+
+        # Host authoritatively rebroadcasts state so the client's flow stays
+        # in sync and any other subscribers (e.g. result screen) see the
+        # latest selection.
+        if self._flow.network_role == NetworkRole.HOST:
+            self._net.send(
+                MSG_STATE, route=cur, flow=self._flow.to_snapshot()
+            )
 
     def _apply_remote_nav(self, route: str) -> None:
         self._applying_remote_nav = True

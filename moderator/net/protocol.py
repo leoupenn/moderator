@@ -63,6 +63,30 @@ MSG_PLAY_REFERENCE = "play_reference"
 #   {"type":"abort_to_home"}
 MSG_ABORT_TO_HOME = "abort_to_home"
 
+# C -> H: NTP-style clock-sync probe. ``t1`` is the client's ``time.time()`` in
+# ms at send time. The host echoes it back in its response so we can pair
+# request/response without extra bookkeeping.
+#   {"type":"time_sync_req","t1":<client_send_ms>}
+MSG_TIME_SYNC_REQ = "time_sync_req"
+
+# H -> C: response to ``time_sync_req``. ``t2`` is the host's clock when the
+# request was received, ``t3`` is the host's clock at the moment the response
+# was flushed. The client records ``t4`` locally and computes
+# ``offset = ((t2 - t1) + (t3 - t4)) / 2`` (host minus client, in ms) and
+# ``rtt = (t4 - t1) - (t3 - t2)``.
+#   {"type":"time_sync_resp","t1":<int>,"t2":<int>,"t3":<int>}
+MSG_TIME_SYNC_RESP = "time_sync_resp"
+
+# C -> H: client player picked a duck on its own machine. Host updates
+# ``flow.character_pN`` and rebroadcasts ``MSG_STATE`` so both UIs mirror.
+#   {"type":"character_select","player":2,"character":"ducky"}
+MSG_CHARACTER_SELECT = "character_select"
+
+# C -> H: the non-host player pressed Confirm / ready on a pregame screen it
+# owns (e.g. CharacterChoiceP2). The host advances the shared flow.
+#   {"type":"ready","from_player":2,"screen":"char_p2"}
+MSG_READY = "ready"
+
 
 # ---------- encode / decode -------------------------------------------------
 def encode_message(msg_type: str, **fields) -> bytes:

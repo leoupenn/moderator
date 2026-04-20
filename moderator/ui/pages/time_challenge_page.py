@@ -13,8 +13,13 @@ networked match:
 - Client renders the host's state. It runs P2 locally (reading its own
   controller) and pushes submits + live pattern updates back to the host.
 
-The shared clock is a host-issued ``start_epoch_ms``; both machines compute
-their own elapsed by subtracting from ``time.time()``.
+The shared clock is a host-issued ``start_epoch_ms``. The host anchors
+against its own ``time.time()``; the client translates the host's epoch into
+its local clock frame using ``NetworkManager.host_to_local_ms`` (NTP-style
+offset measured at connect time). If that offset hasn't been sampled yet,
+the client falls back to anchoring on the arrival time of ``MSG_START_ROUND``
+— this trades the old wall-clock drift for sub-second one-way network
+latency so two machines with skewed OS clocks still show the same timer.
 """
 from __future__ import annotations
 
@@ -511,7 +516,19 @@ class TimeChallengePage(FlowPage):
             target = msg.get("target") or []
             if len(target) < SLOTS:
                 target = list(target) + [0] * (SLOTS - len(target))
-            start_epoch_ms = int(msg.get("start_epoch_ms", time.time() * 1000))
+            host_start_epoch_ms = int(
+                msg.get("start_epoch_ms", time.time() * 1000)
+            )
+            # Translate the host's epoch into this machine's ``time.time()``
+            # frame. If the NTP-style offset has landed, apply it so both
+            # sides count the same elapsed. Otherwise anchor on arrival so
+            # the client's display tracks its own clock (off by ~one-way
+            # latency, not by the raw wall-clock skew between OS clocks).
+            mw = self._main_window()
+            if mw is not None and mw.net.is_clock_synced:
+                local_start_ms = mw.net.host_to_local_ms(host_start_epoch_ms)
+            else:
+                local_start_ms = int(time.time() * 1000)
             rnd = msg.get("round")
             if isinstance(rnd, int):
                 self.flow.current_round = rnd
@@ -519,7 +536,7 @@ class TimeChallengePage(FlowPage):
             if isinstance(bpm, int):
                 self.flow.bpm = bpm
                 self._session.set_bpm(bpm)
-            self._begin_round(target[:SLOTS], start_epoch_ms)
+            self._begin_round(target[:SLOTS], local_start_ms)
             return
 
         if kind == MSG_PLAY_REFERENCE and role == NetworkRole.CLIENT:
