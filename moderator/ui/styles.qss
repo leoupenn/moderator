@@ -1,8 +1,11 @@
 /* DoEG Beat It — QSS generated from Figma tokens (see theme.py for node ids). */
 
-QWidget { color: {{white}}; background: transparent; font-family: "{{font_body}}", {{font_fallback}}; }
+/* Base defaults — only set color & font here so we don't override specific
+   widget backgrounds via cascading. */
+QWidget { color: {{white}}; font-family: "{{font_body}}", {{font_fallback}}; }
 
 QMainWindow, #CentralRoot, #PageBackground { background: {{bg}}; }
+#PageBackground { background: {{bg}}; }
 
 /* Hero/display text uses Jersey 10, configured per-widget via QFont. */
 
@@ -12,7 +15,7 @@ QPushButton#ChoiceYellow,
 QPushButton#ChoiceDark {
     border: none;
     border-radius: 45px;
-    padding: 16px 56px;
+    padding: 8px 20px;
     color: {{white}};
     font-family: "{{font_display}}", {{font_fallback}};
     font-size: 44px;
@@ -22,10 +25,13 @@ QPushButton#ChoiceYellow { background: {{accent_yellow}}; }
 QPushButton#ChoiceDark   { background: {{dark_panel}}; }
 QPushButton#ChoiceBlue:hover,
 QPushButton#ChoiceYellow:hover,
-QPushButton#ChoiceDark:hover { padding: 14px 54px; }
-QPushButton#ChoiceBlue:pressed,
-QPushButton#ChoiceYellow:pressed,
-QPushButton#ChoiceDark:pressed { padding: 18px 58px; }
+QPushButton#ChoiceDark:hover {
+    /* Subtle lift without padding shift (padding changes clip the text on
+       fixed-width pills, so keep padding stable across states). */
+}
+QPushButton#ChoiceBlue:pressed   { background: #82B6CB; }
+QPushButton#ChoiceYellow:pressed { background: #C4A92B; }
+QPushButton#ChoiceDark:pressed   { background: #0D0D0D; }
 QPushButton#ChoiceBlue:disabled,
 QPushButton#ChoiceYellow:disabled,
 QPushButton#ChoiceDark:disabled { color: rgba(255, 255, 255, 140); }

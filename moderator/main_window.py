@@ -5,6 +5,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QMainWindow,
     QMessageBox,
@@ -13,8 +14,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .session import FlowState, GameMode, GameSession, MultiplayerMode
+from .net import (
+    MSG_ABORT_TO_HOME,
+    MSG_HELLO,
+    MSG_INPUT_PATTERN,
+    MSG_NAV,
+    MSG_PLAY_REFERENCE,
+    MSG_ROUND_RESULT,
+    MSG_START_ROUND,
+    MSG_STATE,
+    MSG_SUBMIT,
+    MSG_WELCOME,
+    NetworkManager,
+    PROTOCOL_VERSION,
+)
+from .session import FlowState, GameMode, GameSession, MultiplayerMode, NetworkRole
 from .ui import AppNavigator, DESIGN_H, DESIGN_W, FIGMA_FILE_URL, load_app_stylesheet
+from .ui.theme import THEME
 from .ui.pages import (
     CharacterChoiceP1Page,
     CharacterChoiceP2WaitingPage,
@@ -43,12 +59,20 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Beat It! — Moderator")
-        self.setStyleSheet(load_app_stylesheet())
+        # Apply the QSS globally via QApplication so styles cascade into every
+        # child widget regardless of local stylesheets on page containers.
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(load_app_stylesheet())
         self.setMinimumSize(1280, 800)
         self.resize(DESIGN_W, DESIGN_H)
 
         self._flow = FlowState()
         self._session = GameSession(self)
+        self._net = NetworkManager(self._flow, self)
+        # Guard flag to avoid bouncing route_changed → MSG_NAV → route_changed
+        # when the client mirrors a host-driven navigation.
+        self._applying_remote_nav = False
 
         # Wrap the 1512×982 design canvas in a scroll area so smaller screens
         # still get the full fidelity Figma layout.
@@ -56,7 +80,8 @@ class MainWindow(QMainWindow):
         self._stack.setFixedSize(DESIGN_W, DESIGN_H)
 
         stage_host = QWidget()
-        stage_host.setStyleSheet("background: #000;")
+        stage_host.setObjectName("StageHost")
+        stage_host.setStyleSheet(f"#StageHost {{ background: {THEME.bg}; }}")
         stage_layout = QHBoxLayout(stage_host)
         stage_layout.setContentsMargins(0, 0, 0, 0)
         stage_layout.addStretch(1)
@@ -72,6 +97,12 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(scroller)
 
         self._nav = AppNavigator(self._stack, self)
+        self._nav.route_changed.connect(self._on_route_changed)
+
+        # Networking signal wiring — the manager itself is created above; we
+        # only subscribe to the messages/status here.
+        self._net.message_received.connect(self._on_net_message)
+        self._net.host_client_connected.connect(self._on_peer_joined)
 
         self._register_routes()
         self._nav.go("loading")
@@ -113,9 +144,11 @@ class MainWindow(QMainWindow):
         return p
 
     def _page_intro(self) -> IntroductionPage:
+        # Kept registered for completeness (Figma 8:74), but not part of the
+        # active flow — Welcome → Tutorial covers the same question.
         p = IntroductionPage(self._flow)
         self._bind_help(p)
-        p.difficulty_selected.connect(self._on_introduction_answered)
+        p.difficulty_selected.connect(lambda _d: self._nav.go("sp_character"))
         return p
 
     def _page_welcome(self) -> WelcomePage:
@@ -213,18 +246,12 @@ class MainWindow(QMainWindow):
     def _on_mode_selected(self, mode: GameMode) -> None:
         self._flow.reset_match()
         if mode == GameMode.SINGLE:
-            self._nav.go("introduction")
-        else:
-            self._nav.go("competition")
-
-    def _on_introduction_answered(self, diff) -> None:
-        # Figma flow: 8:74 -> 8:58 (Tutorial) if Novice, otherwise skip straight
-        # to Single Player Experience (17:242) -> Character pick.
-        from .session import Difficulty
-        if diff == Difficulty.NOVICE:
+            # Skip the undecorated Introduction (8:74) — it's redundant with
+            # Tutorial (8:58) which asks the same Novice / Experienced question
+            # with the full mascot layout.
             self._nav.go("tutorial")
         else:
-            self._nav.go("sp_experience")
+            self._nav.go("competition")
 
     def _on_rounds_confirmed(self, _rounds: int) -> None:
         if self._flow.mode == GameMode.MULTI and self._flow.multiplayer_mode == MultiplayerMode.RECREATE_RHYTHM:
@@ -251,10 +278,97 @@ class MainWindow(QMainWindow):
         self._flow.reset_all()
         self._nav.go("welcome")
 
+    # ----- networking: nav / state sync -----------------------------------
+    def _on_route_changed(self, name: str) -> None:
+        # Host broadcasts every navigation so the client mirrors exactly.
+        # The client itself never sends nav messages — it only follows.
+        if self._applying_remote_nav:
+            return
+        if self._flow.network_role == NetworkRole.HOST:
+            self._net.send(MSG_STATE, route=name, flow=self._flow.to_snapshot())
+            self._net.send(MSG_NAV, route=name)
+
+    def _on_peer_joined(self, _addr: str) -> None:
+        # Fresh client: push the current route + full flow snapshot so its UI
+        # catches up to wherever we are.
+        self._net.send(MSG_WELCOME, player_id=2, version=PROTOCOL_VERSION)
+        cur = self._nav.current() or "welcome"
+        self._net.send(MSG_STATE, route=cur, flow=self._flow.to_snapshot())
+        self._net.send(MSG_NAV, route=cur)
+
+    def _on_net_message(self, msg: dict) -> None:
+        kind = msg.get("type")
+        if kind == MSG_HELLO and self._flow.network_role == NetworkRole.HOST:
+            # Handshake reply already sent in _on_peer_joined; nothing to do.
+            return
+        if kind == MSG_WELCOME and self._flow.network_role == NetworkRole.CLIENT:
+            pid = int(msg.get("player_id", 2))
+            self._flow.local_player = pid
+            return
+        if kind == MSG_STATE and self._flow.network_role == NetworkRole.CLIENT:
+            snap = msg.get("flow") or {}
+            self._flow.apply_snapshot(snap)
+            route = msg.get("route")
+            if isinstance(route, str):
+                self._apply_remote_nav(route)
+            return
+        if kind == MSG_NAV and self._flow.network_role == NetworkRole.CLIENT:
+            route = msg.get("route")
+            if isinstance(route, str):
+                self._apply_remote_nav(route)
+            return
+        if kind == MSG_ABORT_TO_HOME:
+            self._flow.reset_all()
+            self._apply_remote_nav("welcome")
+            return
+        # Time Challenge game messages — delegated to the page if present.
+        if kind in (
+            MSG_START_ROUND,
+            MSG_INPUT_PATTERN,
+            MSG_SUBMIT,
+            MSG_ROUND_RESULT,
+            MSG_PLAY_REFERENCE,
+        ):
+            tc = self._nav.get("time_challenge")
+            if tc is not None and hasattr(tc, "handle_network_message"):
+                tc.handle_network_message(msg)
+            return
+
+    def _apply_remote_nav(self, route: str) -> None:
+        self._applying_remote_nav = True
+        try:
+            self._nav.go(route)
+        except KeyError:
+            pass
+        finally:
+            self._applying_remote_nav = False
+
+    # ----- networking: UI entry points ------------------------------------
+    def start_host(self, port: int = 8769) -> None:
+        self._net.start_host(port)
+
+    def join_host(self, ip: str, port: int = 8769) -> None:
+        self._net.start_client(ip, port)
+
+    def stop_network(self) -> None:
+        self._net.stop()
+
+    @property
+    def net(self) -> NetworkManager:
+        return self._net
+
     # ----- help chip handlers ---------------------------------------------
     def _open_settings(self) -> None:
-        dlg = SettingsDialog(self._flow, self._session, self)
+        dlg = SettingsDialog(self._flow, self._session, self, network=self._net)
+        dlg.home_requested.connect(lambda: (dlg.accept(), self._on_back_home_networked()))
         dlg.exec()
+
+    def _on_back_home_networked(self) -> None:
+        # If we're the host, tell P2 to follow us home. If we're the client,
+        # just drop the connection; the host retains authority either way.
+        if self._flow.network_role == NetworkRole.HOST:
+            self._net.send(MSG_ABORT_TO_HOME)
+        self._on_back_home()
 
     def _open_help(self) -> None:
         QMessageBox.information(
@@ -274,4 +388,5 @@ class MainWindow(QMainWindow):
     # ----- shutdown --------------------------------------------------------
     def closeEvent(self, event) -> None:  # noqa: D401
         self._session.shutdown()
+        self._net.stop()
         super().closeEvent(event)

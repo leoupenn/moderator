@@ -3,12 +3,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 
 class GameMode(Enum):
     SINGLE = auto()
     MULTI = auto()
+
+
+class NetworkRole(Enum):
+    SOLO = auto()
+    HOST = auto()
+    CLIENT = auto()
 
 
 class MultiplayerMode(Enum):
@@ -81,6 +87,17 @@ class FlowState:
     bpm: int = 80
     scores: List[RoundScore] = field(default_factory=list)
 
+    # ----- networking (two-machine MP) ------------------------------------
+    # Role of *this* instance. Host owns the authoritative session; client
+    # mirrors what host broadcasts and sends only input/submit messages.
+    network_role: NetworkRole = NetworkRole.SOLO
+    host_ip: str = ""
+    host_port: int = 8769
+    # Which player this machine controls locally (1 on host, 2 on client).
+    local_player: int = 1
+    # Purely informational status string for the settings panel / UI.
+    network_status: str = ""
+
     def wins_p1(self) -> int:
         return sum(1 for s in self.scores if s.winner == 1)
 
@@ -101,3 +118,64 @@ class FlowState:
         self.rounds_total = 5
         self.level = LevelTier.NORMAL
         self.reset_match()
+
+    # ---------- serialization for the network state broadcast -------------
+    # Only gameplay fields — the network_* fields are instance-local and not
+    # sent over the wire (client keeps its own role, host_ip, etc.).
+    def to_snapshot(self) -> Dict[str, Any]:
+        return {
+            "mode": self.mode.name if self.mode else None,
+            "multiplayer_mode": (
+                self.multiplayer_mode.name if self.multiplayer_mode else None
+            ),
+            "difficulty": self.difficulty.name if self.difficulty else None,
+            "genre": self.genre.name if self.genre else None,
+            "character_p1": self.character_p1.name,
+            "character_p2": self.character_p2.name,
+            "rounds_total": self.rounds_total,
+            "current_round": self.current_round,
+            "level": self.level.name,
+            "bpm": self.bpm,
+            "scores": [
+                {"p1": s.player1, "p2": s.player2, "winner": s.winner}
+                for s in self.scores
+            ],
+        }
+
+    def apply_snapshot(self, snap: Dict[str, Any]) -> None:
+        """Mutate this FlowState to match a snapshot from the host."""
+        def _enum_from_name(enum_cls, name):
+            if not name:
+                return None
+            try:
+                return enum_cls[name]
+            except KeyError:
+                return None
+
+        self.mode = _enum_from_name(GameMode, snap.get("mode"))
+        self.multiplayer_mode = _enum_from_name(
+            MultiplayerMode, snap.get("multiplayer_mode")
+        )
+        self.difficulty = _enum_from_name(Difficulty, snap.get("difficulty"))
+        self.genre = _enum_from_name(Genre, snap.get("genre"))
+        c1 = _enum_from_name(Character, snap.get("character_p1"))
+        if c1 is not None:
+            self.character_p1 = c1
+        c2 = _enum_from_name(Character, snap.get("character_p2"))
+        if c2 is not None:
+            self.character_p2 = c2
+        self.rounds_total = int(snap.get("rounds_total", self.rounds_total))
+        self.current_round = int(snap.get("current_round", self.current_round))
+        lvl = _enum_from_name(LevelTier, snap.get("level"))
+        if lvl is not None:
+            self.level = lvl
+        self.bpm = int(snap.get("bpm", self.bpm))
+        self.scores = []
+        for s in snap.get("scores", []) or []:
+            self.scores.append(
+                RoundScore(
+                    player1=int(s.get("p1", 0)),
+                    player2=int(s.get("p2", 0)),
+                    winner=s.get("winner"),
+                )
+            )

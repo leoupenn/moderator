@@ -8,6 +8,7 @@ from .flow_state import (
     GameMode,
     Genre,
     MultiplayerMode,
+    NetworkRole,
 )
 from .game_session import GameSession
 
@@ -19,4 +20,5 @@ __all__ = [
     "GameSession",
     "Genre",
     "MultiplayerMode",
+    "NetworkRole",
 ]

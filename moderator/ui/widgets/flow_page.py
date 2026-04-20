@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget
 
-from ..theme import DESIGN_H, DESIGN_W, THEME
+from ..theme import DESIGN_H, DESIGN_W
 from .help_button import HelpButton
 
 if TYPE_CHECKING:
@@ -27,7 +27,7 @@ class FlowPage(QWidget):
         self.setObjectName("PageBackground")
         self.setFixedSize(DESIGN_W, DESIGN_H)
         self.setAutoFillBackground(True)
-        self.setStyleSheet(f"#PageBackground {{ background: {THEME.bg}; }}")
+        # Background is painted via the global QSS rule #PageBackground.
         self._help = HelpButton(self)
         self._help.move(1377, 32)
         self._help.raise_()

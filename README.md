@@ -2,6 +2,36 @@
 
 Desktop host for a two-player, turn-based rhythm duel: **Player 1** sets a 16-step pattern on a capacitive controller; **Player 2** hears it and tries to match. The app is **PySide6**; the controller is **XIAO ESP32-C3** firmware with dual **MPR121** sensors and an 8-LED **NeoPixel** strip for grading feedback.
 
+## Two-computer multiplayer (Competitive Mode / Time Challenge)
+
+Run the desktop app on **both** laptops, each with its own custom controller, on the **same Wi-Fi network**. One machine is the **host** (Player 1 — authoritative: owns game logic, timers, scoring); the other is the **client** (Player 2 — renders whatever the host says and sends its controller input back). Transport is plain TCP with newline-delimited JSON (default port **`8769`**); the code lives in [`moderator/net/`](moderator/net/).
+
+### From the Settings drawer (Help chip, top-right on every page)
+
+1. On **Player 1's laptop**, open Settings → set **Role** to **Host (Player 1)** → press **Start host**. The drawer reads out the machine's LAN IP (e.g. `192.168.1.42`) and port.
+2. On **Player 2's laptop**, open Settings → set **Role** to **Join as Player 2** → enter the host IP + port → press **Join host**. Status updates to `Connected to <ip>:<port> as Player 2`.
+3. On Player 1, walk the normal flow: **Welcome → Multiplayer → Character → Rounds → Levels → Time Challenge**. Every screen change is mirrored on Player 2's laptop automatically.
+4. During Time Challenge, each player submits on **their own** laptop (**D** on host for P1, **K** on client for P2). The host computes the authoritative winner and broadcasts the result.
+5. The top-right **Return to homepage** button in Settings resets both machines; the client can also just press **Stop hosting / Disconnect from host** to leave.
+
+### From the command line (handy for a quick local test)
+
+```bash
+# Terminal A (acts as Player 1's machine)
+python3 main.py --host --port 8769
+
+# Terminal B (acts as Player 2's machine) — use 127.0.0.1 for a loopback test
+python3 main.py --join 127.0.0.1 --port 8769
+```
+
+On two real laptops, replace `127.0.0.1` with the host's LAN IP.
+
+### Troubleshooting
+
+- If the client can't connect, make sure the host's firewall allows **inbound TCP** on the chosen port (macOS asks the first time; on Linux, open the port manually).
+- Both machines must be on the same Wi-Fi / subnet; Apple's "Private Wi-Fi address" randomization can shuffle IPs between reboots — verify with `ipconfig getifaddr en0` on the host.
+- Only **one** Player 2 slot is exposed; extra connections are politely dropped.
+
 ## Digital web app (rooms)
 
 A browser version lives under [`web/`](web/) (Vite + React + TypeScript) with a small Socket.IO server in [`server/`](server/). Two devices join the same room code: one **composer** fills **8 slots** (one bar of eighth beats) using **eighth rest**, **eighth note**, **quarter note**, **half note**, and **whole note** blocks; the other **guesser** hears **Play reference** with a **4-beat metronome count-in** and **quarter-note clicks** under the phrase, rebuilds the rhythm, and submits for grading. **Grading** matches [`moderator/game_logic.py`](moderator/game_logic.py) internally (16 start/end steps); the UI shows **8 slot** LEDs and G/R letters (green only if that eighth matches). Phrase audio follows [`moderator/phrase_audio.py`](moderator/phrase_audio.py) (FIFO start/end, gaps, sine). **Play mine** is phrase audio only (no count-in or clicks).

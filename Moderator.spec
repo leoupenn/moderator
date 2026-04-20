@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
+import sys
 
 from PyInstaller.utils.hooks import collect_all
 
@@ -59,9 +60,24 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
-app = BUNDLE(
-    exe,
-    name='Moderator.app',
-    icon=None,
-    bundle_identifier=None,
-)
+
+# Build outputs:
+# - macOS: bundle as a .app
+# - Windows/Linux: onedir folder (zip and ship the folder)
+if sys.platform == "darwin":
+    app = BUNDLE(
+        exe,
+        name="Moderator.app",
+        icon=None,
+        bundle_identifier=None,
+    )
+else:
+    app = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name="Moderator",
+    )

@@ -5,7 +5,7 @@ import time
 from typing import List, Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QFont, QKeyEvent
+from PySide6.QtGui import QFont, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
 from ...game_logic import Phase, SLOTS
@@ -13,8 +13,6 @@ from ...session import FlowState, GameSession
 from ...session.flow_state import RoundScore
 from ..theme import DESIGN_W, THEME
 from ..widgets import (
-    ChoiceButton,
-    ChoiceStyle,
     DuckMascot,
     FlowPage,
     RhythmTrackGrid,
@@ -74,6 +72,8 @@ class RecreateRhythmP2Page(FlowPage):
         strip = QFrame(self)
         strip.setObjectName("RhythmStrip")
         strip.setGeometry(213, 172, 1086, 95)
+        strip.setCursor(Qt.CursorShape.PointingHandCursor)
+        strip.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         strip_lbl = QLabel("Play Player 1's Rhythm…", strip)
         strip_lbl.setObjectName("StripLabel")
         sl = QFont(THEME.font_display)
@@ -84,6 +84,12 @@ class RecreateRhythmP2Page(FlowPage):
 
         play_icon = svg_widget("play_ellipse.svg", 60, 60, strip)
         play_icon.move(1010, 18)
+
+        # Clicking anywhere on the strip replays Player 1's rhythm.
+        def _strip_click(_e: QMouseEvent) -> None:
+            session.play_reference()
+
+        strip.mousePressEvent = _strip_click  # type: ignore[assignment]
 
         card = QFrame(self)
         card.setObjectName("CardYellow")
@@ -140,21 +146,12 @@ class RecreateRhythmP2Page(FlowPage):
         self._track = RhythmTrackGrid(self)
         self._track.move(229, 730)
 
-        play_btn = ChoiceButton("Play P1 rhythm", ChoiceStyle.BLUE, width=260, height=64, parent=self)
-        pbf = QFont(THEME.font_display)
-        pbf.setPixelSize(26)
-        play_btn.setFont(pbf)
-        play_btn.move(229, 940 - 70)
-        play_btn.clicked.connect(session.play_reference)
-
-        submit_btn = ChoiceButton("Submit", ChoiceStyle.DARK, width=260, height=64, parent=self)
-        submit_btn.setFont(pbf)
-        submit_btn.move(DESIGN_W - 229 - 260, 940 - 70)
-        submit_btn.clicked.connect(self._submit)
-
+        # Figma 21:944 has no bottom buttons — input is keyboard-only
+        # (Space to replay P1's rhythm, K / Enter to submit). A thin status
+        # line sits just under the grid for transient messages.
         self._status = QLabel("", self)
         self._status.setObjectName("StatusLine")
-        self._status.setGeometry(229, 945, DESIGN_W - 458, 24)
+        self._status.setGeometry(229, 921, DESIGN_W - 458, 22)
 
         session.live_pattern_changed.connect(self._on_live)
         session.feedback_ready.connect(self._on_feedback)

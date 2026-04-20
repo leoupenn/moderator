@@ -4,7 +4,8 @@ from __future__ import annotations
 from typing import List
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QPixmap, QTransform
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from ...session.flow_state import Character
@@ -87,12 +88,22 @@ class CharacterStrip(QFrame):
         btn = QPushButton()
         btn.setObjectName("ArrowChip")
         btn.setFixedSize(40, 40)
-        icon = QIcon(str(asset_path("expand_left.svg")))
-        btn.setIcon(icon)
-        btn.setIconSize(QSize(24, 24))
+        # Render expand_left.svg into a pixmap, then horizontally flip it for
+        # the right-arrow variant so we don't need a second asset.
+        from PySide6.QtCore import Qt as _Qt
+        from PySide6.QtGui import QPainter
+
+        size = 24
+        pix = QPixmap(size, size)
+        pix.fill(_Qt.GlobalColor.transparent)
+        renderer = QSvgRenderer(str(asset_path("expand_left.svg")))
+        painter = QPainter(pix)
+        renderer.render(painter)
+        painter.end()
         if mirror:
-            btn.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-            btn.setStyleSheet("QPushButton#ArrowChip { qproperty-layoutDirection: RightToLeft; }")
+            pix = pix.transformed(QTransform().scale(-1, 1), _Qt.TransformationMode.SmoothTransformation)
+        btn.setIcon(QIcon(pix))
+        btn.setIconSize(QSize(size, size))
         return btn
 
     def _go_prev(self) -> None:
