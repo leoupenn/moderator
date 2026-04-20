@@ -222,6 +222,8 @@ class RecreateRhythmP2Page(FlowPage):
             player1=0,
             player2=self._elapsed_ms,
             winner=winner,
+            attempts_p1=1,
+            attempts_p2=int(self._attempts),
         )
         self.flow.scores.append(score)
         QTimer.singleShot(1200, self.round_done.emit)
@@ -240,7 +242,13 @@ class RecreateRhythmP2Page(FlowPage):
         self._finished = True
         self._tick.stop()
         self._track.set_feedback([False] * SLOTS)
-        score = RoundScore(player1=0, player2=self._elapsed_ms, winner=1)
+        score = RoundScore(
+            player1=0,
+            player2=self._elapsed_ms,
+            winner=1,
+            attempts_p1=1,
+            attempts_p2=int(self._attempts),
+        )
         self.flow.scores.append(score)
         QTimer.singleShot(1200, self.round_done.emit)
 

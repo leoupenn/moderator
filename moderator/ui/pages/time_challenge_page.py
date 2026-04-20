@@ -32,6 +32,7 @@ from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
 from ...game_logic import Phase, SLOTS, binary_pattern_for_playback, compare_patterns
 from ...net import (
+    MSG_ATTEMPTS_UPDATE,
     MSG_INPUT_PATTERN,
     MSG_PLAY_REFERENCE,
     MSG_ROUND_RESULT,
@@ -308,6 +309,31 @@ class TimeChallengePage(FlowPage):
         self._p2_card.set_time_ms(0)
         self._p1_card.set_attempt(1)
         self._p2_card.set_attempt(1)
+        # Push the reset counters to the client too so "Attempt 1" appears on
+        # P2's card even before the first miss.
+        self._broadcast_attempts()
+
+    def _bump_attempts(self, player: int) -> None:
+        """Increment the counter for a player and mirror it to the peer."""
+        if player == 1:
+            self._attempts_p1 += 1
+            self._p1_card.set_attempt(self._attempts_p1)
+        else:
+            self._attempts_p2 += 1
+            self._p2_card.set_attempt(self._attempts_p2)
+        self._broadcast_attempts()
+
+    def _broadcast_attempts(self) -> None:
+        if self.flow.network_role != NetworkRole.HOST:
+            return
+        mw = self._main_window()
+        if mw is None:
+            return
+        mw.net.send(
+            MSG_ATTEMPTS_UPDATE,
+            attempts_p1=int(self._attempts_p1),
+            attempts_p2=int(self._attempts_p2),
+        )
 
     def _pick_pattern(self) -> List[int]:
         choices = _LEVEL_PATTERNS.get(self.flow.level, _LEVEL_PATTERNS[LevelTier.NORMAL])
@@ -362,7 +388,13 @@ class TimeChallengePage(FlowPage):
 
         if role == NetworkRole.CLIENT:
             # Client only submits P2 via the network; host is the sole judge.
+            # Show feedback on this machine's grid only — the host UI is P1's
+            # view and should not flash the miss/hit pattern of P2's attempt.
             attempt = binary_pattern_for_playback(self._session.live_state)
+            matches, n_ok = compare_patterns(self._last_target, list(attempt))
+            self._track.set_feedback(matches)
+            if n_ok != SLOTS:
+                QTimer.singleShot(950, self._track.clear)
             mw = self._main_window()
             if mw is not None:
                 mw.net.send(
@@ -383,31 +415,27 @@ class TimeChallengePage(FlowPage):
         if n_ok == SLOTS:
             self._complete_player(player)
         else:
-            if player == 1:
-                self._attempts_p1 += 1
-                self._p1_card.set_attempt(self._attempts_p1)
-            else:
-                self._attempts_p2 += 1
-                self._p2_card.set_attempt(self._attempts_p2)
+            self._bump_attempts(player)
+            # This is the host's own P1 submit (or a solo run) — showing
+            # feedback on the local grid is correct because the submitter is
+            # sitting in front of this machine.
             self._track.set_feedback(matches)
             QTimer.singleShot(900, self._session.feedback_continue)
             QTimer.singleShot(950, self._track.clear)
 
     def _score_submission(self, player: int, attempt: List[int]) -> None:
-        """Host-side (or solo) scoring for an attempted pattern."""
+        """Host-side authoritative scoring of a remote (client) attempt.
+
+        The visual feedback grid is intentionally *not* touched here: the
+        submitter is the client and it paints the miss/hit pattern on its
+        own machine. Painting it here would show P1 a flash that belongs to
+        P2's screen.
+        """
         matches, n_ok = compare_patterns(self._last_target, attempt)
         if n_ok == SLOTS:
             self._complete_player(player)
-            self._track.set_feedback(matches)
             return
-        if player == 1:
-            self._attempts_p1 += 1
-            self._p1_card.set_attempt(self._attempts_p1)
-        else:
-            self._attempts_p2 += 1
-            self._p2_card.set_attempt(self._attempts_p2)
-        self._track.set_feedback(matches)
-        QTimer.singleShot(950, self._track.clear)
+        self._bump_attempts(player)
 
     def _complete_player(self, player: int) -> None:
         if player == 1:
@@ -447,7 +475,13 @@ class TimeChallengePage(FlowPage):
 
     def _record_round_result(self) -> None:
         if self.flow.mode == GameMode.SINGLE:
-            score = RoundScore(player1=self._elapsed_ms_p1, player2=0, winner=1)
+            score = RoundScore(
+                player1=self._elapsed_ms_p1,
+                player2=0,
+                winner=1,
+                attempts_p1=int(self._attempts_p1),
+                attempts_p2=1,
+            )
         else:
             winner = (
                 1
@@ -458,6 +492,8 @@ class TimeChallengePage(FlowPage):
                 player1=self._elapsed_ms_p1,
                 player2=self._elapsed_ms_p2,
                 winner=winner,
+                attempts_p1=int(self._attempts_p1),
+                attempts_p2=int(self._attempts_p2),
             )
         self.flow.scores.append(score)
 
@@ -558,6 +594,13 @@ class TimeChallengePage(FlowPage):
             # Optional: show P2's live pattern somewhere on the host UI later.
             return
 
+        if kind == MSG_ATTEMPTS_UPDATE and role == NetworkRole.CLIENT:
+            self._attempts_p1 = int(msg.get("attempts_p1", self._attempts_p1))
+            self._attempts_p2 = int(msg.get("attempts_p2", self._attempts_p2))
+            self._p1_card.set_attempt(self._attempts_p1)
+            self._p2_card.set_attempt(self._attempts_p2)
+            return
+
         if kind == MSG_ROUND_RESULT and role == NetworkRole.CLIENT:
             self._elapsed_ms_p1 = int(msg.get("elapsed_p1", 0))
             self._elapsed_ms_p2 = int(msg.get("elapsed_p2", 0))
@@ -572,6 +615,8 @@ class TimeChallengePage(FlowPage):
                 player1=self._elapsed_ms_p1,
                 player2=self._elapsed_ms_p2,
                 winner=winner if winner in (1, 2) else None,
+                attempts_p1=int(self._attempts_p1),
+                attempts_p2=int(self._attempts_p2),
             )
             self.flow.scores.append(score)
             self._round_locked = True

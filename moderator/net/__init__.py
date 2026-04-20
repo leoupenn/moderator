@@ -4,6 +4,7 @@ from .host_server import HostServer
 from .manager import NetworkManager
 from .protocol import (
     MSG_ABORT_TO_HOME,
+    MSG_ATTEMPTS_UPDATE,
     MSG_CHARACTER_SELECT,
     MSG_HELLO,
     MSG_INPUT_PATTERN,
@@ -29,6 +30,7 @@ __all__ = [
     "NetworkManager",
     "NetworkRole",
     "MSG_ABORT_TO_HOME",
+    "MSG_ATTEMPTS_UPDATE",
     "MSG_CHARACTER_SELECT",
     "MSG_HELLO",
     "MSG_INPUT_PATTERN",

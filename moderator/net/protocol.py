@@ -47,6 +47,12 @@ MSG_INPUT_PATTERN = "input_pattern"
 #   {"type":"submit","player":2,"pattern":[0/1 x 16],"client_elapsed_ms":<int>}
 MSG_SUBMIT = "submit"
 
+# H -> C: authoritative running attempt counters so the joining machine sees
+# the same "Attempt N" number on each player card as the host. Sent whenever
+# either counter changes (including a round reset to 1) — cheap to rebroadcast.
+#   {"type":"attempts_update","attempts_p1":<int>,"attempts_p2":<int>}
+MSG_ATTEMPTS_UPDATE = "attempts_update"
+
 # H -> C: authoritative round result after both players have submitted (or one
 # side was force-finished). elapsed_* is authoritative host-measured time.
 #   {"type":"round_result","elapsed_p1":<int>,"elapsed_p2":<int>,

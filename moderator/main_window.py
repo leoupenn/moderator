@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from .net import (
     MSG_ABORT_TO_HOME,
+    MSG_ATTEMPTS_UPDATE,
     MSG_CHARACTER_SELECT,
     MSG_HELLO,
     MSG_INPUT_PATTERN,
@@ -343,6 +344,7 @@ class MainWindow(QMainWindow):
             MSG_SUBMIT,
             MSG_ROUND_RESULT,
             MSG_PLAY_REFERENCE,
+            MSG_ATTEMPTS_UPDATE,
         ):
             tc = self._nav.get("time_challenge")
             if tc is not None and hasattr(tc, "handle_network_message"):
@@ -411,6 +413,18 @@ class MainWindow(QMainWindow):
     @property
     def net(self) -> NetworkManager:
         return self._net
+
+    def broadcast_state(self) -> None:
+        """Rebroadcast the current route + full flow snapshot.
+
+        Pages call this after mutating ``flow`` mid-screen (e.g. the host
+        picking a round count) so the client's mirrored UI refreshes in
+        real time without waiting for a navigation transition.
+        """
+        if self._flow.network_role != NetworkRole.HOST:
+            return
+        route = self._nav.current() or ""
+        self._net.send(MSG_STATE, route=route, flow=self._flow.to_snapshot())
 
     # ----- help chip handlers ---------------------------------------------
     def _open_settings(self) -> None:

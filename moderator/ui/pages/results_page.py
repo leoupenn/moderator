@@ -85,26 +85,30 @@ class ResultsPage(FlowPage):
         time_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         col.addWidget(time_lbl)
 
-        att_row = QHBoxLayout()
-        att_row.setContentsMargins(0, 0, 0, 0)
-
-        att_lbl = QLabel("Attempts:")
+        # Stack label + count vertically so "Attempts" is never clipped by a
+        # wide digit font in a narrow card (the old HBox squeezed the caption).
+        att_lbl = QLabel("Attempts")
         al = QFont(THEME.font_display)
-        al.setPixelSize(48)
+        al.setPixelSize(32)
         att_lbl.setFont(al)
         att_lbl.setStyleSheet(f"color: {THEME.white};")
-        att_row.addWidget(att_lbl)
+        att_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
         att_val = QLabel("—")
         av = QFont(THEME.font_display)
-        av.setPixelSize(72)
+        av.setPixelSize(64)
         att_val.setFont(av)
         att_val.setStyleSheet(f"color: {THEME.white};")
-        att_val.setAlignment(Qt.AlignmentFlag.AlignRight)
-        att_row.addWidget(att_val, 1, Qt.AlignmentFlag.AlignRight)
+        att_val.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+
+        att_col = QVBoxLayout()
+        att_col.setContentsMargins(0, 4, 0, 0)
+        att_col.setSpacing(4)
+        att_col.addWidget(att_lbl)
+        att_col.addWidget(att_val)
 
         att_host = QWidget()
-        att_host.setLayout(att_row)
+        att_host.setLayout(att_col)
         col.addWidget(att_host)
 
         # Stash getters
@@ -130,8 +134,8 @@ class ResultsPage(FlowPage):
 
         p1_time.setText(_fmt_ms(latest.player1))
         p2_time.setText(_fmt_ms(latest.player2))
-        p1_att.setText(self._attempts_summary(latest, 1))
-        p2_att.setText(self._attempts_summary(latest, 2))
+        p1_att.setText(str(latest.attempts_p1))
+        p2_att.setText(str(latest.attempts_p2))
 
         if self.flow.mode == GameMode.SINGLE:
             self._p2_card.setVisible(False)
@@ -139,12 +143,6 @@ class ResultsPage(FlowPage):
         else:
             self._p2_card.setVisible(True)
             self._p2_duck.setVisible(True)
-
-    def _attempts_summary(self, s: RoundScore, player: int) -> str:
-        # We don't store attempt count in RoundScore yet; compute a label from winner.
-        if s.winner is None:
-            return "Tie"
-        return "WIN" if s.winner == player else "—"
 
     def _on_continue(self) -> None:
         if self.flow.current_round >= self.flow.rounds_total:

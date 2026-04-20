@@ -66,9 +66,11 @@ class LevelTier(Enum):
 
 @dataclass
 class RoundScore:
-    player1: int = 0  # attempts it took for P1 (lower = better) or ms elapsed
+    player1: int = 0  # ms elapsed (Time Challenge) or mode-specific metric
     player2: int = 0
     winner: Optional[int] = None  # 1, 2, or None for tie
+    attempts_p1: int = 1
+    attempts_p2: int = 1
 
 
 @dataclass
@@ -137,7 +139,13 @@ class FlowState:
             "level": self.level.name,
             "bpm": self.bpm,
             "scores": [
-                {"p1": s.player1, "p2": s.player2, "winner": s.winner}
+                {
+                    "p1": s.player1,
+                    "p2": s.player2,
+                    "winner": s.winner,
+                    "attempts_p1": s.attempts_p1,
+                    "attempts_p2": s.attempts_p2,
+                }
                 for s in self.scores
             ],
         }
@@ -177,5 +185,7 @@ class FlowState:
                     player1=int(s.get("p1", 0)),
                     player2=int(s.get("p2", 0)),
                     winner=s.get("winner"),
+                    attempts_p1=int(s.get("attempts_p1", 1)),
+                    attempts_p2=int(s.get("attempts_p2", 1)),
                 )
             )
