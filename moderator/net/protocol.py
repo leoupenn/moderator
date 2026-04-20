@@ -107,6 +107,25 @@ MSG_REQUEST_NAV = "request_nav"
 #   {"type":"time_challenge_control","action":"force_next_round"|"play_reference"}
 MSG_TIME_CHALLENGE_CONTROL = "time_challenge_control"
 
+# H -> C: Recreate Rhythm — host locked in their P1 rhythm. Sent immediately
+# after MSG_NAV("rr_p2") so the client's P2 page grades against the same
+# reference the host submitted.
+#   {"type":"rr_target","pattern":[0/1 x 16],"bpm":80,"round":1}
+MSG_RR_TARGET = "rr_target"
+
+# C -> H: Recreate Rhythm — client's live attempt progress. Sent on every
+# submit so the host's spectator mirror can render the wordle grid, attempt
+# counter, and elapsed timer without owning the input pad.
+#   {"type":"rr_attempt","pattern":[0/1 x 16],"matches":[bool x 16],
+#    "attempts":<int>,"elapsed_ms":<int>}
+MSG_RR_ATTEMPT = "rr_attempt"
+
+# C -> H: Recreate Rhythm — final result for the round. Host records the
+# RoundScore and navigates to the results screen (which broadcasts MSG_NAV
+# back to the client).
+#   {"type":"rr_result","win":true,"attempts":<int>,"elapsed_ms":<int>}
+MSG_RR_RESULT = "rr_result"
+
 
 # ---------- encode / decode -------------------------------------------------
 def encode_message(msg_type: str, **fields) -> bytes:
