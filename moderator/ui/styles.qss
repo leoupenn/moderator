@@ -1,0 +1,196 @@
+/* DoEG Beat It — QSS generated from Figma tokens (see theme.py for node ids). */
+
+QWidget { color: {{white}}; background: transparent; font-family: "{{font_body}}", {{font_fallback}}; }
+
+QMainWindow, #CentralRoot, #PageBackground { background: {{bg}}; }
+
+/* Hero/display text uses Jersey 10, configured per-widget via QFont. */
+
+/* Primary choice pills used on Welcome / Tutorial / Competition (334x91). */
+QPushButton#ChoiceBlue,
+QPushButton#ChoiceYellow,
+QPushButton#ChoiceDark {
+    border: none;
+    border-radius: 45px;
+    padding: 16px 56px;
+    color: {{white}};
+    font-family: "{{font_display}}", {{font_fallback}};
+    font-size: 44px;
+}
+QPushButton#ChoiceBlue   { background: {{accent_blue}}; }
+QPushButton#ChoiceYellow { background: {{accent_yellow}}; }
+QPushButton#ChoiceDark   { background: {{dark_panel}}; }
+QPushButton#ChoiceBlue:hover,
+QPushButton#ChoiceYellow:hover,
+QPushButton#ChoiceDark:hover { padding: 14px 54px; }
+QPushButton#ChoiceBlue:pressed,
+QPushButton#ChoiceYellow:pressed,
+QPushButton#ChoiceDark:pressed { padding: 18px 58px; }
+QPushButton#ChoiceBlue:disabled,
+QPushButton#ChoiceYellow:disabled,
+QPushButton#ChoiceDark:disabled { color: rgba(255, 255, 255, 140); }
+
+/* Help button (settings + question), 40x40 circular chips */
+QPushButton#HelpChip {
+    background: {{help_chip}};
+    border: none;
+    border-radius: 20px;
+    min-width: 40px; max-width: 40px;
+    min-height: 40px; max-height: 40px;
+}
+QPushButton#HelpChip:hover { background: #E4E4E4; }
+QPushButton#HelpChip:pressed { background: #CFCFCF; }
+
+/* Small pill button used on selection inside character picker / "Select this Level" */
+QPushButton#PillSmall {
+    background: {{accent_blue}};
+    border: none;
+    border-radius: 28px;
+    padding: 8px 32px;
+    color: {{white}};
+    font-family: "{{font_display}}", {{font_fallback}};
+    font-size: 28px;
+}
+QPushButton#PillSmall:hover  { background: #A2D0E4; }
+QPushButton#PillSmall:pressed{ background: #82B6CB; }
+
+/* Ghost arrow chip for character/genre carousel (40x40) */
+QPushButton#ArrowChip {
+    background: {{ghost_chip}};
+    border: none;
+    border-radius: 20px;
+    min-width: 40px; max-width: 40px;
+    min-height: 40px; max-height: 40px;
+    color: {{white}};
+}
+QPushButton#ArrowChip:hover { background: rgba(255, 255, 255, 80); }
+
+/* Character name pill (247x65 dark translucent) */
+QLabel#CharNamePill {
+    background: {{ghost_pill}};
+    border-radius: 32px;
+    color: {{white}};
+    padding: 14px 54px;
+    font-family: "{{font_display}}", {{font_fallback}};
+    font-size: 28px;
+}
+
+/* Large rounded card (blue or yellow frame) used on character / gameplay / results */
+QFrame#CardBlue,
+QFrame#CardYellow,
+QFrame#CardDark,
+QFrame#CardWhite {
+    border-radius: 20px;
+    border: none;
+}
+QFrame#CardBlue   { background: {{accent_blue}}; }
+QFrame#CardYellow { background: {{accent_yellow}}; }
+QFrame#CardDark   { background: {{slate}}; }
+QFrame#CardWhite  { background: {{card_white}}; }
+
+/* Rhythm progress strip, used at top of gameplay screens */
+QFrame#RhythmStrip { background: {{card_white}}; border-radius: 48px; }
+QLabel#StripLabel  { color: {{bg}}; font-family: "{{font_display}}", {{font_fallback}}; font-size: 36px; }
+
+/* Feedback grid block (dark rounded chip) */
+QFrame#FeedbackGrid { background: {{rhythm_grid_bg}}; border-radius: 14px; }
+
+/* Genre card (white 234x190) */
+QPushButton#GenreCard {
+    background: {{card_white}};
+    border: none;
+    border-radius: 20px;
+    color: {{slate}};
+    font-family: "{{font_display}}", {{font_fallback}};
+    font-size: 54px;
+}
+QPushButton#GenreCard:checked {
+    background: {{accent_blue}};
+    color: {{white}};
+}
+
+/* "X Rounds" wide selection buttons */
+QPushButton#RoundsCard {
+    background: {{card_white}};
+    border: none;
+    border-radius: 50px;
+    color: {{slate}};
+    font-family: "{{font_display}}", {{font_fallback}};
+    font-size: 52px;
+    padding: 20px 40px;
+}
+QPushButton#RoundsCard:checked {
+    background: {{accent_blue}};
+    color: {{white}};
+}
+
+/* Level card (white column 411x488) */
+QFrame#LevelCard { background: {{card_white}}; border-radius: 10px; }
+QLabel#LevelTitle { color: {{mid_gray}}; font-family: "{{font_display}}", {{font_fallback}}; font-size: 40px; }
+QLabel#LevelAttr  { color: {{mid_gray}}; font-family: "{{font_display}}", {{font_fallback}}; font-size: 26px; }
+
+/* Player label on gameplay + results cards */
+QLabel#PlayerTitle  { color: {{white}}; font-family: "{{font_display}}", {{font_fallback}}; font-size: 40px; }
+QLabel#TimeDigits   { color: {{white}}; font-family: "{{font_display}}", {{font_fallback}}; font-size: 96px; letter-spacing: 6px; }
+QLabel#TimeDigitsBig{ color: {{white}}; font-family: "{{font_display}}", {{font_fallback}}; font-size: 112px; letter-spacing: 6px; }
+QLabel#AttemptLabel { color: {{white}}; font-family: "{{font_display}}", {{font_fallback}}; font-size: 52px; }
+QLabel#SubmitHint   { color: {{slate}}; font-family: "{{font_display}}", {{font_fallback}}; font-size: 36px; }
+
+/* Headline stack (kicker + title) */
+QLabel#HeroTitle    { color: {{white}}; font-family: "{{font_display}}", {{font_fallback}}; font-size: 96px; }
+QLabel#HeroTitleSm  { color: {{white}}; font-family: "{{font_display}}", {{font_fallback}}; font-size: 56px; }
+QLabel#HeroSubtitle { color: {{white}}; font-family: "{{font_display}}", {{font_fallback}}; font-size: 36px; }
+QLabel#Kicker       { color: {{white}}; font-family: "{{font_display}}", {{font_fallback}}; font-size: 28px; }
+
+/* BPM input + progress (used on rhythm-creation card) */
+QFrame#BpmPill   { background: {{white}}; border-radius: 50px; }
+QLabel#BpmLabel  { color: {{bg}};    font-family: "{{font_display}}", {{font_fallback}}; font-size: 40px; }
+QSpinBox#BpmBox  {
+    background: transparent;
+    border: 2px solid {{bg}};
+    border-radius: 32px;
+    padding: 0 22px;
+    color: {{dark_panel}};
+    font-family: "{{font_display}}", {{font_fallback}}; font-size: 54px;
+    min-width: 120px;
+}
+QSpinBox#BpmBox::up-button, QSpinBox#BpmBox::down-button { width: 0; height: 0; }
+
+/* Settings drawer (port/baud/etc) */
+QDialog#SettingsDialog { background: {{dark_panel}}; }
+QDialog QLabel { color: {{white}}; font-size: 14px; }
+QDialog QComboBox, QDialog QSpinBox, QDialog QDoubleSpinBox {
+    background: {{slate}};
+    color: {{white}};
+    border: 1px solid #555;
+    border-radius: 6px;
+    padding: 6px 10px;
+}
+QDialog QPushButton {
+    background: {{accent_blue}};
+    border: none;
+    border-radius: 16px;
+    padding: 8px 18px;
+    color: {{white}};
+}
+QDialog QPushButton#Danger { background: #C44; }
+
+/* Waiting modal */
+QFrame#WaitingModal { background: {{slate}}; border-radius: 20px; }
+QLabel#WaitingTitle { color: {{white}}; font-family: "{{font_display}}", {{font_fallback}}; font-size: 80px; letter-spacing: 4px; }
+
+/* Overlay scrim */
+QFrame#Scrim { background: rgba(0, 0, 0, 130); }
+
+/* Final total result modal (white card) */
+QFrame#TotalResultCard { background: {{card_white}}; border-radius: 20px; }
+QLabel#TotalResultTitle { color: {{slate}}; font-family: "{{font_display}}", {{font_fallback}}; font-size: 56px; letter-spacing: 3px; }
+QLabel#TotalResultWinner { color: {{accent_blue}}; font-family: "{{font_display}}", {{font_fallback}}; font-size: 108px; letter-spacing: 6px; }
+
+/* Status/toast text (used by game session feedback) */
+QLabel#StatusLine { color: {{white}}; font-family: "{{font_body}}", {{font_fallback}}; font-size: 14px; }
+
+/* Scrollbars */
+QScrollBar:vertical { background: transparent; width: 10px; margin: 0; }
+QScrollBar::handle:vertical { background: rgba(255,255,255,60); border-radius: 4px; min-height: 30px; }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; }

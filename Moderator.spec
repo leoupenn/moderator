@@ -1,7 +1,23 @@
 # -*- mode: python ; coding: utf-8 -*-
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_all
 
-datas = []
+_ROOT = Path(__file__).resolve().parent
+datas = [
+    (str(p), "moderator/ui/assets")
+    for p in (_ROOT / "moderator" / "ui" / "assets").glob("*.svg")
+]
+datas += [
+    (str(p), "moderator/ui/assets/fonts")
+    for p in (_ROOT / "moderator" / "ui" / "assets" / "fonts").glob("*.ttf")
+]
+datas.append(
+    (
+        str(_ROOT / "moderator" / "ui" / "styles.qss"),
+        "moderator/ui",
+    )
+)
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('PySide6')
