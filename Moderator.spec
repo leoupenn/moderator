@@ -4,7 +4,9 @@ import sys
 
 from PyInstaller.utils.hooks import collect_all
 
-_ROOT = Path(__file__).resolve().parent
+# NOTE: In some environments (notably GitHub Actions), PyInstaller executes spec files
+# with `__file__` unset. We rely on the workflow running PyInstaller from the repo root.
+_ROOT = Path.cwd()
 datas = [
     (str(p), "moderator/ui/assets")
     for p in (_ROOT / "moderator" / "ui" / "assets").glob("*.svg")
