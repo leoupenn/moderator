@@ -1,7 +1,7 @@
 """Figma 21:1456 / 21:1859 — Final Leaderboard (total wins + overall winner modal)."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
@@ -45,7 +45,7 @@ class LeaderboardPage(FlowPage):
 
         back = ChoiceButton("Back to Home", ChoiceStyle.DARK, width=426, height=91, parent=self)
         back.move((DESIGN_W - 426) // 2, 820)
-        back.clicked.connect(self.back_home.emit)
+        back.clicked.connect(self._on_back_to_home)
 
         # Total result overlay (Figma node 21:1496).
         self._scrim = QFrame(self)
@@ -87,6 +87,12 @@ class LeaderboardPage(FlowPage):
         self._dismiss.clicked.connect(self._scrim.hide)
         col.addWidget(self._dismiss, 0, Qt.AlignmentFlag.AlignCenter)
 
+        self._sp_auto_home_cancelled = False
+
+    def _on_back_to_home(self) -> None:
+        self._sp_auto_home_cancelled = True
+        self.back_home.emit()
+
     def _make_card(self, title: str, style: str) -> tuple[QFrame, QLabel]:
         card = QFrame()
         card.setObjectName(style)
@@ -116,6 +122,7 @@ class LeaderboardPage(FlowPage):
         return card, v
 
     def on_enter(self) -> None:
+        self._sp_auto_home_cancelled = False
         self._p1_duck.set_asset(self.flow.character_p1.asset)
         self._p2_duck.set_asset(self.flow.character_p2.asset)
         self._p1_val.setText(str(self.flow.wins_p1()))
@@ -125,6 +132,8 @@ class LeaderboardPage(FlowPage):
             self._p2_card.setVisible(False)
             self._p2_duck.setVisible(False)
             self._winner.setText("Match complete!")
+            QTimer.singleShot(1400, self._sp_auto_hide_scrim)
+            QTimer.singleShot(4800, self._sp_auto_return_home)
         else:
             w1 = self.flow.wins_p1()
             w2 = self.flow.wins_p2()
@@ -136,3 +145,13 @@ class LeaderboardPage(FlowPage):
                 self._winner.setText("Player 2 Wins!")
         self._scrim.show()
         self._scrim.raise_()
+
+    def _sp_auto_hide_scrim(self) -> None:
+        if self._sp_auto_home_cancelled or self.flow.mode != GameMode.SINGLE:
+            return
+        self._scrim.hide()
+
+    def _sp_auto_return_home(self) -> None:
+        if self._sp_auto_home_cancelled or self.flow.mode != GameMode.SINGLE:
+            return
+        self.back_home.emit()

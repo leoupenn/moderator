@@ -36,6 +36,8 @@ FIGMA_NODES: dict[str, str] = {
     "rr_p2": "21:944",
     "results": "21:1223",
     "leaderboard": "21:1456",
+    # Novice tutorial — "Piano Sheets" frame raster (image 9)
+    "novice_piano_sheet_image": "100:1110",
 }
 
 DESIGN_W = 1512

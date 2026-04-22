@@ -37,11 +37,12 @@ from .net import (
     NetworkManager,
     PROTOCOL_VERSION,
 )
-from .session import FlowState, GameMode, GameSession, MultiplayerMode, NetworkRole
-from .session.flow_state import Character, LevelTier
+from .session import FlowState, GameMode, GameSession, Genre, MultiplayerMode, NetworkRole
+from .session.flow_state import Character, LevelTier, level_tier_for_single_player_genre
 from .ui import AppNavigator, DESIGN_H, DESIGN_W, FIGMA_FILE_URL, load_app_stylesheet
 from .ui.theme import THEME
 from .ui.pages import (
+    NOVICE_FLOW,
     CharacterChoiceP1Page,
     CharacterChoiceP2WaitingPage,
     CompetitionPage,
@@ -60,6 +61,7 @@ from .ui.pages import (
     TutorialPage,
     WelcomePage,
 )
+from .ui.pages.novice_tutorial import NoviceWelcomeIntroPage
 from .ui.settings_dialog import SettingsDialog
 
 
@@ -138,6 +140,29 @@ class MainWindow(QMainWindow):
         self._nav.register("rr_p2", lambda: self._page_rr_p2())
         self._nav.register("results", lambda: self._page_results())
         self._nav.register("leaderboard", lambda: self._page_leaderboard())
+        self._register_novice_routes()
+
+    def _register_novice_routes(self) -> None:
+        """Register the 16 novice tutorial pages + chain their Continue CTAs."""
+        for idx, (route, cls) in enumerate(NOVICE_FLOW):
+            next_route = (
+                NOVICE_FLOW[idx + 1][0] if idx + 1 < len(NOVICE_FLOW) else "sp_character"
+            )
+
+            def factory(cls=cls, route=route, next_route=next_route):
+                page = cls(self._flow)
+                self._bind_help(page)
+                # First page uses ready_clicked; rest use continue_clicked.
+                if isinstance(page, NoviceWelcomeIntroPage):
+                    page.ready_clicked.connect(lambda nr=next_route: self._nav.go(nr))
+                    page.skip_clicked.connect(lambda: self._nav.go("sp_character"))
+                else:
+                    page.continue_clicked.connect(
+                        lambda nr=next_route: self._nav.go(nr)
+                    )
+                return page
+
+            self._nav.register(route, factory)
 
     # ----- page factories (wire per-page signals here) ---------------------
     def _bind_help(self, page) -> None:
@@ -170,8 +195,17 @@ class MainWindow(QMainWindow):
     def _page_tutorial(self) -> TutorialPage:
         p = TutorialPage(self._flow)
         self._bind_help(p)
-        p.difficulty_selected.connect(lambda _d: self._nav.go("sp_character"))
+        p.difficulty_selected.connect(self._on_tutorial_difficulty)
         return p
+
+    def _on_tutorial_difficulty(self, difficulty) -> None:
+        """Novice players go through the full 16-screen walkthrough first."""
+        from .session.flow_state import Difficulty
+
+        if difficulty == Difficulty.NOVICE:
+            self._nav.go(NOVICE_FLOW[0][0])
+        else:
+            self._nav.go("sp_character")
 
     def _page_sp_experience(self) -> SinglePlayerExperiencePage:
         p = SinglePlayerExperiencePage(self._flow)
@@ -188,7 +222,7 @@ class MainWindow(QMainWindow):
     def _page_sp_genre(self) -> SinglePlayerGenrePage:
         p = SinglePlayerGenrePage(self._flow)
         self._bind_help(p)
-        p.confirmed.connect(lambda _g: self._nav.go("levels"))
+        p.confirmed.connect(self._on_sp_genre_time_challenge)
         return p
 
     def _page_competition(self) -> CompetitionPage:
@@ -253,6 +287,20 @@ class MainWindow(QMainWindow):
         return p
 
     # ----- flow transitions ------------------------------------------------
+    def _on_sp_genre_time_challenge(self, genre: Genre) -> None:
+        """Single-player: genre picks Easy/Normal/Expert; one round then results."""
+        tier = level_tier_for_single_player_genre(genre)
+        self._flow.level = tier
+        self._flow.bpm = {
+            LevelTier.EASY: 60,
+            LevelTier.NORMAL: 80,
+            LevelTier.EXPERT: 110,
+        }[tier]
+        self._flow.rounds_total = 1
+        self._flow.current_round = 1
+        self._flow.scores = []
+        self._nav.go("time_challenge")
+
     def _on_mode_selected(self, mode: GameMode) -> None:
         self._flow.reset_match()
         if mode == GameMode.SINGLE:
@@ -563,7 +611,8 @@ class MainWindow(QMainWindow):
             "Beat It! — Help",
             (
                 "Single Player walks you through Tutorial → Character → Genre → "
-                "Levels → Time Challenge.\n\n"
+                "Time Challenge (genre sets Easy / Normal / Expert; one round) → "
+                "Leaderboard → Home.\n\n"
                 "Multiplayer picks Time Challenge or Recreate Rhythm after "
                 "character selection.\n\n"
                 "Press D to submit for Player 1, K for Player 2. Spacebar plays the "

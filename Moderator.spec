@@ -12,6 +12,10 @@ datas = [
     for p in (_ROOT / "moderator" / "ui" / "assets").glob("*.svg")
 ]
 datas += [
+    (str(p), "moderator/ui/assets")
+    for p in (_ROOT / "moderator" / "ui" / "assets").glob("*.png")
+]
+datas += [
     (str(p), "moderator/ui/assets/fonts")
     for p in (_ROOT / "moderator" / "ui" / "assets" / "fonts").glob("*.ttf")
 ]

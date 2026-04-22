@@ -54,6 +54,8 @@ from ..widgets import (
 )
 
 
+# Multiplayer cycles through both variants per tier. Single-player uses only
+# the first pattern per tier (genre maps to a tier; one play per run).
 _LEVEL_PATTERNS: dict[LevelTier, List[List[int]]] = {
     LevelTier.EASY: [
         [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
@@ -340,8 +342,10 @@ class TimeChallengePage(FlowPage):
 
     def _pick_pattern(self) -> List[int]:
         choices = _LEVEL_PATTERNS.get(self.flow.level, _LEVEL_PATTERNS[LevelTier.NORMAL])
+        if self.flow.mode == GameMode.SINGLE:
+            return list(choices[0])
         idx = (self.flow.current_round - 1) % len(choices)
-        return choices[idx]
+        return list(choices[idx])
 
     def _on_tick(self) -> None:
         if self._start_epoch_ms is None:

@@ -64,6 +64,25 @@ class LevelTier(Enum):
     EXPERT = auto()
 
 
+def level_tier_for_single_player_genre(genre: Genre) -> LevelTier:
+    """Single-player Time Challenge: each genre maps to one difficulty tier.
+
+    There is exactly one target pattern per tier in ``TimeChallengePage``;
+    genre choice selects tempo / pattern family without a separate levels
+    screen.
+    """
+    easy = {Genre.JAZZ, Genre.POP, Genre.KPOP}
+    normal = {Genre.JPOP, Genre.CLASSIC, Genre.SIMPLE, Genre.TECHNO}
+    expert = {Genre.BLUES, Genre.SALSA, Genre.FUNK}
+    if genre in easy:
+        return LevelTier.EASY
+    if genre in normal:
+        return LevelTier.NORMAL
+    if genre in expert:
+        return LevelTier.EXPERT
+    return LevelTier.NORMAL
+
+
 # ----- Recreate Rhythm role rotation ----------------------------------------
 # Players swap composer / recreator duties every round so Player 2 gets to
 # invent rhythms on even rounds and Player 1 plays the guesser. Round numbers
