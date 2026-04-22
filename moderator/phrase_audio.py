@@ -5,9 +5,13 @@ import math
 import struct
 from typing import Final, List, Tuple
 
+from .click_audio import make_stereo_click
 from .game_logic import SLOTS, normalize_pattern
 
 SAMPLE_RATE: Final[int] = 44100
+
+# One bar of quarter-note count-in before phrase playback (Time Challenge, etc.).
+DEFAULT_COUNT_IN_QUARTERS: Final[int] = 4
 
 # ~4 ms slew at note on/off boundaries
 EDGE_RAMP_S: Final[float] = 0.004
@@ -84,6 +88,86 @@ def _note_audio_intervals_s(
             out.append((t0, t1))
 
     return out
+
+
+def prepend_quarter_count_in_to_phrase(
+    phrase_pcm: bytes,
+    *,
+    sample_rate: int,
+    channels: int,
+    encoding: str,
+    bpm: float,
+    count_in_quarters: int = DEFAULT_COUNT_IN_QUARTERS,
+    click_volume: float = 0.62,
+) -> bytes:
+    """
+    Prepend one measure of metronome clicks (one click per quarter note) so the
+    phrase downbeat lines up with the beat after the last count-in click.
+
+    ``phrase_pcm`` must be interleaved PCM matching ``encoding`` (``int16`` or
+    ``float32``), ``channels``, and ``sample_rate``.
+    """
+    if count_in_quarters <= 0:
+        return phrase_pcm
+    ch = max(1, int(channels))
+    sr = max(8000, int(sample_rate))
+    bpm_f = max(20.0, float(bpm))
+    beat_s = 60.0 / bpm_f
+    total_s = count_in_quarters * beat_s
+    n_frames = max(1, int(round(total_s * sr)))
+
+    if encoding == "int16":
+        frame_bytes = 2 * ch
+    elif encoding == "float32":
+        frame_bytes = 4 * ch
+    else:
+        raise ValueError(f"Unknown encoding: {encoding}")
+
+    buf = bytearray(n_frames * frame_bytes)
+    click = make_stereo_click(
+        sample_rate=sr,
+        channels=ch,
+        encoding=encoding,
+        volume=click_volume,
+    )
+    n_click_frames = len(click) // frame_bytes
+
+    def _mix_int16() -> None:
+        for b in range(count_in_quarters):
+            off_fr = int(round(b * beat_s * sr))
+            off_b = off_fr * frame_bytes
+            for fi in range(n_click_frames):
+                dst0 = off_b + fi * frame_bytes
+                if dst0 + frame_bytes > len(buf):
+                    break
+                for c in range(ch):
+                    p = dst0 + c * 2
+                    q = fi * frame_bytes + c * 2
+                    vb = struct.unpack_from("<h", buf, p)[0]
+                    vc = struct.unpack_from("<h", click, q)[0]
+                    struct.pack_into("<h", buf, p, max(-32767, min(32767, vb + vc)))
+
+    def _mix_float32() -> None:
+        for b in range(count_in_quarters):
+            off_fr = int(round(b * beat_s * sr))
+            off_b = off_fr * frame_bytes
+            for fi in range(n_click_frames):
+                dst0 = off_b + fi * frame_bytes
+                if dst0 + frame_bytes > len(buf):
+                    break
+                for c in range(ch):
+                    p = dst0 + c * 4
+                    q = fi * frame_bytes + c * 4
+                    vb = struct.unpack_from("<f", buf, p)[0]
+                    vc = struct.unpack_from("<f", click, q)[0]
+                    struct.pack_into("<f", buf, p, max(-1.0, min(1.0, vb + vc)))
+
+    if encoding == "int16":
+        _mix_int16()
+    else:
+        _mix_float32()
+
+    return bytes(buf) + phrase_pcm
 
 
 def render_held_sine_phrase(

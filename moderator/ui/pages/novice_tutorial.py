@@ -31,7 +31,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QKeyEvent, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QCursor, QFont, QKeyEvent, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QLabel,
@@ -40,6 +40,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...game_logic import SLOTS
+from ...phrase_audio import DEFAULT_COUNT_IN_QUARTERS, note_intervals_from_pattern
 from ...session import FlowState
 from ..theme import DESIGN_H, DESIGN_W, THEME
 from ..widgets.asset_loader import asset_path
@@ -727,7 +729,19 @@ class NoviceHardware4Page(_HardwareCountRowPage):
 
 
 class _NoteTypeBase(NoviceTutorialBase):
-    """Shared layout for Eighth/Quarter/Half/Whole note explainers."""
+    """Shared layout for Eighth/Quarter/Half/Whole note explainers.
+
+    When a ``GameSession`` is attached via :py:meth:`attach_session` *and*
+    :py:attr:`AUTOPLAY_BLOCKS` is set, the page listens to the live hardware
+    pattern and auto-plays the rhythm + advances to the next screen as soon
+    as the physical blocks form the expected figure (one eighth-note block
+    for Eighth, two contiguous blocks for Quarter, etc.).
+    """
+
+    # Number of contiguous filled grid blocks the connected controller must
+    # report before the page auto-plays and advances. ``None`` disables the
+    # behaviour (used by Half/Whole note which stay manual via Continue).
+    AUTOPLAY_BLOCKS: Optional[int] = None
 
     def __init__(
         self,
@@ -759,8 +773,113 @@ class _NoteTypeBase(NoviceTutorialBase):
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             v.addWidget(lbl)
 
+        self._session = None
+        self._autoplay_armed = False
+        self._autoplay_timer: Optional[QTimer] = None
+        self._pattern_connected = False
+
+    # ----- controller hookup ------------------------------------------------
+    def attach_session(self, session) -> None:
+        """Subscribe to live hardware frames from the shared ``GameSession``."""
+        if self._session is session:
+            return
+        self._session = session
+        if self.AUTOPLAY_BLOCKS is None or self._pattern_connected:
+            return
+        session.live_pattern_changed.connect(self._on_live_pattern)
+        self._pattern_connected = True
+
+    def showEvent(self, event) -> None:  # noqa: D401 - Qt override
+        super().showEvent(event)
+        # Arm auto-advance each time the page becomes visible so back/forward
+        # navigation keeps the gesture responsive.
+        self._autoplay_armed = self.AUTOPLAY_BLOCKS is not None
+
+    def hideEvent(self, event) -> None:  # noqa: D401 - Qt override
+        super().hideEvent(event)
+        self._autoplay_armed = False
+        if self._autoplay_timer is not None:
+            self._autoplay_timer.stop()
+
+    # ----- pattern matching -------------------------------------------------
+    @staticmethod
+    def _filled_blocks(pattern: List[int]) -> List[int]:
+        """Return grid-block indices (0..7) where both slot pads read 1."""
+        out: List[int] = []
+        for k in range(_NOTE_BLOCK_COUNT):
+            a_idx, b_idx = 2 * k, 2 * k + 1
+            if b_idx < len(pattern) and pattern[a_idx] and pattern[b_idx]:
+                out.append(k)
+        return out
+
+    @staticmethod
+    def _has_partial_block(pattern: List[int]) -> bool:
+        """True if any grid block has exactly one of its two slot pads on.
+
+        Partial blocks mean the hardware read is mid-insertion or corrupt —
+        ignore those frames so we only trigger on clean, fully-seated blocks.
+        """
+        for k in range(_NOTE_BLOCK_COUNT):
+            a_idx, b_idx = 2 * k, 2 * k + 1
+            if b_idx < len(pattern):
+                a, b = pattern[a_idx], pattern[b_idx]
+                if (a and not b) or (b and not a):
+                    return True
+        return False
+
+    def _on_live_pattern(self, pattern: List[int]) -> None:
+        if not self._autoplay_armed or self.AUTOPLAY_BLOCKS is None:
+            return
+        if self._has_partial_block(pattern):
+            return
+        blocks = self._filled_blocks(pattern)
+        if len(blocks) != self.AUTOPLAY_BLOCKS:
+            return
+        # Require the filled blocks to be contiguous so a single eighth-note
+        # block (k) or quarter-note block (k, k+1) triggers but two distant
+        # eighth-notes do not.
+        if blocks != list(range(blocks[0], blocks[0] + len(blocks))):
+            return
+        self._autoplay_armed = False
+        self._play_and_advance()
+
+    # ----- playback + advance ----------------------------------------------
+    def _play_and_advance(self) -> None:
+        session = self._session
+        if session is None:
+            self.continue_clicked.emit()
+            return
+        played = False
+        try:
+            played = session.play_current()
+        except Exception:
+            played = False
+        # Compute a tail delay that fits the whole 16-step phrase at the
+        # session's current BPM (240 s / bpm) with a small grace tail.
+        if played:
+            bpm = 80.0
+            try:
+                bpm = max(20.0, float(session.bpm()))
+            except Exception:
+                pass
+            delay_ms = int(240000 / bpm) + 400
+        else:
+            # No audio (controller idle or sink unavailable) — still advance,
+            # but wait long enough that the user sees the gesture land.
+            delay_ms = 600
+        if self._autoplay_timer is None:
+            self._autoplay_timer = QTimer(self)
+            self._autoplay_timer.setSingleShot(True)
+            self._autoplay_timer.timeout.connect(self.continue_clicked.emit)
+        else:
+            self._autoplay_timer.stop()
+        self._autoplay_timer.start(delay_ms)
+
 
 class NoviceEighthNotePage(_NoteTypeBase):
+
+    AUTOPLAY_BLOCKS = 1
+
     def __init__(self, flow: FlowState, parent: QWidget | None = None) -> None:
         super().__init__(
             flow,
@@ -774,6 +893,9 @@ class NoviceEighthNotePage(_NoteTypeBase):
 
 
 class NoviceQuarterNotePage(_NoteTypeBase):
+
+    AUTOPLAY_BLOCKS = 2
+
     def __init__(self, flow: FlowState, parent: QWidget | None = None) -> None:
         super().__init__(
             flow,
@@ -815,49 +937,194 @@ class NoviceWholeNotePage(_NoteTypeBase):
 # ---------------------------------------------------------------------------
 
 
-class NoviceTrial1Page(NoviceTutorialBase):
-    """Walks the player through 'play the rhythm, then press D to submit'.
+_SANDBOX_PLAY_ORANGE = "#E48706"
+_SANDBOX_PLAY_ORANGE_HOVER = "#F29823"
+_SANDBOX_PLAY_ORANGE_PRESSED = "#C27405"
 
-    This is a low-stakes dry run — no scoring, no round tracking. Completion
-    just advances to Trial 2 via the Continue pill.
+
+class _SandboxPlayButton(QPushButton):
+    """Orange "Play Your Rhythm" pill matching the Time Challenge button."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__("Play Your Rhythm", parent)
+        self.setObjectName("SandboxPlayRhythmBtn")
+        self.setFixedSize(316, 54)
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        f = QFont(THEME.font_display)
+        f.setPixelSize(32)
+        self.setFont(f)
+        self.setStyleSheet(
+            "QPushButton#SandboxPlayRhythmBtn {"
+            f"  background: {_SANDBOX_PLAY_ORANGE};"
+            "   color: white;"
+            "   border: none;"
+            "   border-radius: 27px;"
+            "   padding: 0 18px;"
+            "}"
+            "QPushButton#SandboxPlayRhythmBtn:hover {"
+            f"  background: {_SANDBOX_PLAY_ORANGE_HOVER};"
+            "}"
+            "QPushButton#SandboxPlayRhythmBtn:pressed {"
+            f"  background: {_SANDBOX_PLAY_ORANGE_PRESSED};"
+            "}"
+            "QPushButton#SandboxPlayRhythmBtn:disabled {"
+            "   color: rgba(255,255,255,140);"
+            "}"
+        )
+
+
+def _cell_presence_from_pattern(pattern: List[int]) -> List[bool]:
+    """Collapse a 16-slot pattern into the 8 visible beat cells.
+
+    A cell lights if either of its two underlying slots is truthy *or* a
+    decoded note interval (even-start / odd-end FIFO, matching the audio
+    renderer) sustains across either slot. The sustain check makes held
+    notes — e.g. a half note entered as a start at slot 0 and an end at
+    slot 3 — light every beat they cover instead of just the endpoints.
+    """
+    n = min(SLOTS, len(pattern))
+    gate = [False] * SLOTS
+    for i in range(n):
+        if pattern[i]:
+            gate[i] = True
+    for s, e in note_intervals_from_pattern(list(pattern)):
+        for k in range(max(0, s), min(SLOTS - 1, e) + 1):
+            gate[k] = True
+    return [bool(gate[2 * i] or gate[2 * i + 1]) for i in range(8)]
+
+
+class NoviceTrial1Page(NoviceTutorialBase):
+    """Sandbox: insert blocks on the controller and watch the 8 beat circles
+    light up in real time; press **Play Your Rhythm** to hear what you built.
+
+    No scoring, no round tracking. Completion advances to Trial 2 via the
+    Continue pill. If no controller is attached the circles stay idle and the
+    play button still plays whatever's in the shared ``GameSession`` live
+    state (so demos without hardware still work).
     """
 
     def __init__(self, flow: FlowState, parent: QWidget | None = None) -> None:
         super().__init__(
             flow,
             title="Try it yourself — we'll start easy",
-            body="Trial 1",
+            body="Insert blocks into the controller — this row shows which beats "
+            "they cover. Press PLAY YOUR RHYTHM to hear your creation with a "
+            "one-measure count-in.",
             continue_text="Continue",
             parent=parent,
         )
 
-        strip = QFrame(self)
-        strip.setObjectName("RhythmStrip")
-        strip.setFixedSize(1086, 130)
-        strip.move(213, 372)
-        strip_lbl = QLabel("Play the Rhythm: 1  —  2  —  3  —  4".upper(), strip)
-        strip_lbl.setObjectName("StripLabel")
-        strip_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        strip_lbl.setGeometry(0, 0, 1086, 130)
-
         host = QWidget(self)
         host.setFixedSize(1104, 131)
-        host.move(204, 529)
+        host.move((DESIGN_W - 1104) // 2, 485)
         labels = ["1", "and", "2", "and", "3", "and", "4", "and"]
+        self._cells: List[CountCircle] = []
         for i, l in enumerate(labels):
             c = CountCircle(l, 131, parent=host)
             c.move(i * (131 + 8), 0)
+            self._cells.append(c)
 
-        hint = QLabel(
-            "Press D to submit your rhythm • Space to replay target".upper(), self
+        self._play_btn = _SandboxPlayButton(self)
+        self._play_btn.move((DESIGN_W - 316) // 2, 676)
+        self._play_btn.clicked.connect(self._on_play_rhythm)
+
+        self._hint = QLabel(
+            "No controller detected — insert the controller to sandbox.".upper(),
+            self,
         )
-        hint.setStyleSheet(
-            f"color: {THEME.white}; font-family: '{THEME.font_display}'; "
-            f"font-size: 32px; background: transparent;"
+        self._hint.setStyleSheet(
+            f"color: rgba(255,255,255,160); font-family: '{THEME.font_display}'; "
+            f"font-size: 22px; background: transparent;"
         )
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint.setFixedSize(900, 50)
-        hint.move((DESIGN_W - 900) // 2, 720)
+        self._hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._hint.setFixedSize(900, 34)
+        self._hint.move((DESIGN_W - 900) // 2, 744)
+
+        self._session = None
+        self._pattern_connected = False
+
+    def attach_session(self, session) -> None:
+        """Subscribe to the shared ``GameSession`` for live hardware frames."""
+        if self._session is session:
+            return
+        self._session = session
+        if not self._pattern_connected:
+            session.live_pattern_changed.connect(self._on_live_pattern)
+            self._pattern_connected = True
+        # Seed with whatever the session already has so navigating back here
+        # doesn't leave stale circles.
+        try:
+            self._apply_pattern(session.live_state)
+        except Exception:
+            self._clear_cells()
+        self._refresh_hint()
+
+    # ----- reactive visuals -------------------------------------------------
+    def _on_live_pattern(self, pattern: List[int]) -> None:
+        self._apply_pattern(list(pattern))
+        self._refresh_hint()
+
+    def _apply_pattern(self, pattern: List[int]) -> None:
+        cells = _cell_presence_from_pattern(pattern)
+        for c, on in zip(self._cells, cells):
+            c.set_state(
+                CountCircle.STATE_ON if on else CountCircle.STATE_IDLE
+            )
+
+    def _clear_cells(self) -> None:
+        for c in self._cells:
+            c.set_state(CountCircle.STATE_IDLE)
+
+    def _refresh_hint(self) -> None:
+        session = self._session
+        if session is None:
+            self._hint.setText(
+                "Insert blocks and watch the circles light up.".upper()
+            )
+            return
+        connected = False
+        try:
+            connected = bool(getattr(session, "is_connected", False))
+        except Exception:
+            connected = False
+        if connected:
+            self._hint.setText(
+                "Each circle lights the beat its block covers.".upper()
+            )
+        else:
+            self._hint.setText(
+                "No controller detected — you can still press play to hear the "
+                "current pattern.".upper()
+            )
+
+    # ----- playback ---------------------------------------------------------
+    def _on_play_rhythm(self) -> None:
+        session = self._session
+        if session is None:
+            return
+        try:
+            session.play_current(count_in_quarters=DEFAULT_COUNT_IN_QUARTERS)
+        except Exception:
+            pass
+
+    def showEvent(self, event) -> None:  # noqa: D401 - Qt override
+        super().showEvent(event)
+        if self._session is not None:
+            try:
+                self._apply_pattern(self._session.live_state)
+            except Exception:
+                self._clear_cells()
+            self._refresh_hint()
+        else:
+            self._clear_cells()
+
+    def hideEvent(self, event) -> None:  # noqa: D401 - Qt override
+        super().hideEvent(event)
+        if self._session is not None:
+            try:
+                self._session.stop_playback()
+            except Exception:
+                pass
 
 
 class _LegendDot(QWidget):

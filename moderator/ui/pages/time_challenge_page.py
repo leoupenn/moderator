@@ -4,7 +4,8 @@ Refresh of the original head-to-head layout:
 
 * Header ("COMPETITIVE MODE" / "Time Challenge" / "ROUND N") unchanged.
 * Rhythm strip (1086×130 white pill at y=172) with a play icon on the right —
-  clicking the strip plays the target rhythm locally.
+  clicking the strip plays the target rhythm locally after a one-bar (four
+  quarter-note) metronome count-in, same as the orange ``Play Your Rhythm`` pill.
 * Two player cards (450×561), gray for P1 and yellow for P2, each stacking
   Player title · timer digits · attempt counter · submit hint.
 * A single "Play Your Rhythm" orange pill sits inside the *local* player's
@@ -51,6 +52,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...game_logic import Phase, SLOTS, binary_pattern_for_playback, compare_patterns
+from ...phrase_audio import DEFAULT_COUNT_IN_QUARTERS
 from ...net import (
     MSG_ATTEMPTS_UPDATE,
     MSG_INPUT_PATTERN,
@@ -70,7 +72,11 @@ from ..widgets import (
 
 _LEVEL_PATTERNS: dict[LevelTier, List[List[int]]] = {
     LevelTier.EASY: [
-        [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+        # Round 1: one quarter note at the downbeat, then rests for the bar.
+        # Slots are even=start / odd=end (see ``game_logic.slot_role``); one
+        # sustained note from step 0 through 3 lights the first two 8-cell
+        # beats (each cell is a slot pair) and keeps the rest blank.
+        [1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
     ],
     LevelTier.NORMAL: [
@@ -657,7 +663,7 @@ class TimeChallengePage(FlowPage):
         # pill and hears the reference *on their own machine only*. No
         # network broadcast — pressing play shouldn't blast audio at your
         # opponent mid-submit.
-        self._session.play_reference()
+        self._session.play_reference(count_in_quarters=DEFAULT_COUNT_IN_QUARTERS)
 
     def host_apply_play_reference(self) -> None:
         """Legacy network hook — kept so older clients still get audio.
@@ -666,7 +672,7 @@ class TimeChallengePage(FlowPage):
         per-player controls, so this is only called if a peer running an
         older build sends ``MSG_TIME_CHALLENGE_CONTROL {action: play_reference}``.
         """
-        self._session.play_reference()
+        self._session.play_reference(count_in_quarters=DEFAULT_COUNT_IN_QUARTERS)
 
     def host_apply_force_finish(self) -> None:
         """Host-only: force-end invoked from the network (``N`` on P2's machine)."""

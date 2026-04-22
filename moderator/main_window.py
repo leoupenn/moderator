@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QScrollArea,
     QStackedWidget,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -81,8 +82,11 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(load_app_stylesheet())
-        self.setMinimumSize(1280, 800)
+        # Allow the window to shrink on smaller displays, but by default we
+        # expand to fill the primary screen (see ``showEvent``).
+        self.setMinimumSize(1024, 700)
         self.resize(DESIGN_W, DESIGN_H)
+        self._has_filled_screen = False
 
         self._flow = FlowState()
         self._session = GameSession(self)
@@ -99,11 +103,18 @@ class MainWindow(QMainWindow):
         stage_host = QWidget()
         stage_host.setObjectName("StageHost")
         stage_host.setStyleSheet(f"#StageHost {{ background: {THEME.bg}; }}")
-        stage_layout = QHBoxLayout(stage_host)
-        stage_layout.setContentsMargins(0, 0, 0, 0)
-        stage_layout.addStretch(1)
-        stage_layout.addWidget(self._stack)
-        stage_layout.addStretch(1)
+        # Center the 1512×982 canvas both horizontally and vertically so empty
+        # space around it (on larger displays) is symmetric, not left-hanging.
+        v_stage = QVBoxLayout(stage_host)
+        v_stage.setContentsMargins(0, 0, 0, 0)
+        v_stage.addStretch(1)
+        h_row = QHBoxLayout()
+        h_row.setContentsMargins(0, 0, 0, 0)
+        h_row.addStretch(1)
+        h_row.addWidget(self._stack)
+        h_row.addStretch(1)
+        v_stage.addLayout(h_row)
+        v_stage.addStretch(1)
 
         scroller = QScrollArea()
         scroller.setWidget(stage_host)
@@ -170,6 +181,11 @@ class MainWindow(QMainWindow):
             ):
                 page = cls(self._flow)
                 self._bind_help(page)
+                # Note-type pages (8th / Quarter) auto-play + advance when the
+                # matching physical block is slotted into the controller. They
+                # opt in via ``attach_session``; other pages simply ignore it.
+                if hasattr(page, "attach_session"):
+                    page.attach_session(self._session)
                 if isinstance(page, (NoviceWelcomeIntroPage, ExpertIntroCoverPage)):
                     page.ready_clicked.connect(
                         lambda nr=next_route: self._nav.go(nr)
@@ -643,6 +659,22 @@ class MainWindow(QMainWindow):
                 f"Designs: {FIGMA_FILE_URL}"
             ),
         )
+
+    # ----- window lifecycle ------------------------------------------------
+    def showEvent(self, event) -> None:  # noqa: D401
+        super().showEvent(event)
+        # On first show, expand the window to fill the screen it landed on so
+        # the Figma canvas sits inside the largest possible stage.
+        if self._has_filled_screen:
+            return
+        self._has_filled_screen = True
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return
+        geo = screen.availableGeometry()
+        # Clamp to the screen's logical size and move to its origin so macOS
+        # doesn't clip against the menu bar / dock.
+        self.setGeometry(geo)
 
     # ----- shutdown --------------------------------------------------------
     def closeEvent(self, event) -> None:  # noqa: D401

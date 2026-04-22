@@ -30,7 +30,11 @@ from ..game_logic import (
     format_neopixel_clear_serial,
     normalize_pattern,
 )
-from ..phrase_audio import SAMPLE_RATE, render_held_sine_phrase
+from ..phrase_audio import (
+    SAMPLE_RATE,
+    prepend_quarter_count_in_to_phrase,
+    render_held_sine_phrase,
+)
 from ..receiver import send_led as receiver_send_led
 from ..receiver import send_m_line as receiver_send_m_line
 from ..serial_parser import validate_sensed_pattern
@@ -175,13 +179,15 @@ class GameSession(QObject):
         self.attempts_changed.emit(self._failed_attempts)
         self.p1_pattern_submitted.emit(list(self._p1_pattern))
 
-    def play_reference(self) -> None:
-        self._start_playback(self._p1_pattern)
+    def play_reference(self, *, count_in_quarters: int = 0) -> None:
+        """Play the locked reference (P1) pattern. Optional quarter-note count-in."""
+        self._start_playback(self._p1_pattern, count_in_quarters=count_in_quarters)
 
-    def play_current(self) -> bool:
+    def play_current(self, *, count_in_quarters: int = 0) -> bool:
+        """Play the live pad pattern. Optional quarter-note count-in."""
         if self._worker is not None and not self._sensing_stable:
             return False
-        self._start_playback(self._state)
+        self._start_playback(self._state, count_in_quarters=count_in_quarters)
         return True
 
     def p2_submit(self) -> Optional[tuple[List[bool], int]]:
@@ -269,23 +275,42 @@ class GameSession(QObject):
         if self._audio_sink:
             self._audio_sink.stop()
 
-    def _start_playback(self, pattern: List[int]) -> None:
+    def _start_playback(self, pattern: List[int], *, count_in_quarters: int = 0) -> None:
         self.stop_playback()
         self._playback_pattern = binary_pattern_for_playback(pattern)
         step_dur = self._step_duration_s()
         phrase_s = SLOTS * step_dur
+        bpm_f = max(20.0, self._bpm)
+        count_in_s = (
+            (count_in_quarters * (60.0 / bpm_f)) if count_in_quarters > 0 else 0.0
+        )
         if platform.system() == "Darwin" and shutil.which("afplay"):
-            self._play_phrase_macos_afplay(self._playback_pattern, step_dur, phrase_s)
+            self._play_phrase_macos_afplay(
+                self._playback_pattern,
+                step_dur,
+                phrase_s,
+                count_in_quarters=count_in_quarters,
+            )
         else:
-            self._play_phrase_qt_sink(self._playback_pattern, step_dur)
+            self._play_phrase_qt_sink(
+                self._playback_pattern,
+                step_dur,
+                count_in_quarters=count_in_quarters,
+            )
         self._phrase_t0 = time.monotonic()
-        self._phrase_T = phrase_s
+        self._phrase_T = count_in_s + phrase_s
         self._playback_step_dur = step_dur
         self._playback_timer.start(50)
 
     def _play_phrase_macos_afplay(
-        self, pattern: List[int], step_dur: float, phrase_s: float
+        self,
+        pattern: List[int],
+        step_dur: float,
+        phrase_s: float,
+        *,
+        count_in_quarters: int,
     ) -> None:
+        bpm_f = max(20.0, self._bpm)
         pcm = render_held_sine_phrase(
             pattern,
             step_duration_s=step_dur,
@@ -293,6 +318,15 @@ class GameSession(QObject):
             channels=2,
             encoding="int16",
         )
+        if count_in_quarters > 0:
+            pcm = prepend_quarter_count_in_to_phrase(
+                pcm,
+                sample_rate=SAMPLE_RATE,
+                channels=2,
+                encoding="int16",
+                bpm=bpm_f,
+                count_in_quarters=count_in_quarters,
+            )
         fd, path = tempfile.mkstemp(suffix=".wav")
         os.close(fd)
         try:
@@ -307,7 +341,8 @@ class GameSession(QObject):
             except OSError:
                 pass
             return
-        timeout = max(8.0, phrase_s + 4.0)
+        total_s = phrase_s + (count_in_quarters * (60.0 / bpm_f) if count_in_quarters else 0.0)
+        timeout = max(8.0, total_s + 4.0)
 
         def run() -> None:
             try:
@@ -328,9 +363,28 @@ class GameSession(QObject):
 
         threading.Thread(target=run, daemon=True).start()
 
-    def _play_phrase_qt_sink(self, pattern: List[int], step_dur: float) -> None:
+    def _play_phrase_qt_sink(
+        self,
+        pattern: List[int],
+        step_dur: float,
+        *,
+        count_in_quarters: int,
+    ) -> None:
         sink = self._ensure_audio_sink()
+        fmt = sink.format()
+        enc = "int16" if fmt.sampleFormat() == QAudioFormat.Int16 else "float32"
+        sr = int(fmt.sampleRate())
+        ch = int(fmt.channelCount())
         pcm = self._render_phrase_pcm(pattern, step_dur)
+        if count_in_quarters > 0:
+            pcm = prepend_quarter_count_in_to_phrase(
+                pcm,
+                sample_rate=sr,
+                channels=ch,
+                encoding=enc,
+                bpm=max(20.0, self._bpm),
+                count_in_quarters=count_in_quarters,
+            )
         sink.stop()
         try:
             sink.setBufferSize(max(262144, len(pcm) + 65536))
