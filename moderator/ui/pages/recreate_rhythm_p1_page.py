@@ -1,15 +1,21 @@
-"""Figma 21:901 — Recreate Rhythm P1 ('Make a Rhythm!', BPM pill, submit).
+"""Figma 21:901 — Recreate Rhythm 'compose' screen (used by both players).
 
-Role-aware rendering:
+Players swap composer / recreator duties every round:
 
-* **Host / Solo**: the authoritative P1 (the host is always Player 1) sees
-  the full interactive layout — BPM pill, Submit/Preview buttons, keyboard
-  shortcuts (D submits, Space previews). When P1 submits we also broadcast
-  ``MSG_RR_TARGET`` so the joining machine can grade the recreation against
-  the same reference pattern.
-* **Client (Player 2)**: sees a passive "Player 1 is creating a rhythm…"
-  waiting screen with their own duck. All interactive controls (BPM,
-  Submit, Preview, key handlers) are hidden/ignored while P1 is composing.
+* **Odd rounds** (1, 3, 5, \u2026): Player 1 (the host) composes, Player 2 recreates.
+* **Even rounds** (2, 4, 6, \u2026): Player 2 (the client) composes, Player 1 recreates.
+
+The page decides which machine owns the picker based on
+``flow.local_player`` vs ``rr_composer_player(flow.current_round)``:
+
+* **Local composer**: full interactive layout \u2014 BPM pill, Submit / Preview,
+  ``D`` to submit, ``Space`` to preview. When they submit we broadcast
+  ``MSG_RR_TARGET`` with the locked pattern so the peer grades against the
+  same reference. Only the host actually navigates to ``rr_p2`` on its own
+  machine; if the local composer is the client we just send the message
+  and wait for the host's ``MSG_NAV`` to follow.
+* **Local waiter**: passive \u2018\u2026is creating a rhythm\u2019 screen with their own
+  duck. Controls are hidden, keys ignored.
 """
 from __future__ import annotations
 
@@ -19,6 +25,7 @@ from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
 from ...net import MSG_RR_TARGET
 from ...session import FlowState, GameSession, NetworkRole
+from ...session.flow_state import rr_composer_player
 from ..theme import DESIGN_W, THEME
 from ..widgets import (
     BpmInput,
@@ -136,9 +143,19 @@ class RecreateRhythmP1Page(FlowPage):
         self._status.setObjectName("StatusLine")
         self._status.setGeometry(35, 920, DESIGN_W - 70, 30)
 
-    # ----- role detection --------------------------------------------------
-    def _is_client_spectator(self) -> bool:
-        return self.flow.network_role == NetworkRole.CLIENT
+    # ----- role helpers ----------------------------------------------------
+    def _composer_player(self) -> int:
+        return rr_composer_player(self.flow.current_round)
+
+    def _is_local_composer(self) -> bool:
+        return self.flow.local_player == self._composer_player()
+
+    def _composer_character(self):
+        return (
+            self.flow.character_p1
+            if self._composer_player() == 1
+            else self.flow.character_p2
+        )
 
     # ----- lifecycle -------------------------------------------------------
     def on_enter(self) -> None:
@@ -146,33 +163,35 @@ class RecreateRhythmP1Page(FlowPage):
         self._round_label.adjustSize()
         self._round_label.move(DESIGN_W - 20 - self._round_label.width(), 88)
 
-        if self._is_client_spectator():
-            # Player 2's passive waiting view — same layout, neutered controls.
-            self._player_title.setText("Player 2")
-            self._hero.setText("Waiting for Player 1…")
-            self._hint.setText("Player 1 is creating a rhythm")
-            self._duck.set_asset(self.flow.character_p2.asset)
-            self._bpm.setVisible(False)
-            self._submit_btn.setVisible(False)
-            self._preview_btn.setVisible(False)
-            self._status.setText("")
-        else:
-            # Host / Solo: full interactive composer.
-            self._player_title.setText("Player 1")
+        composer = self._composer_player()
+        self._player_title.setText(f"Player {composer}")
+
+        if self._is_local_composer():
+            # Local player owns the composer seat for this round.
             self._hero.setText("Make a Rhythm!")
             self._hint.setText("Press D to submit")
-            self._duck.set_asset(self.flow.character_p1.asset)
+            self._duck.set_asset(self._composer_character().asset)
             self._bpm.setVisible(True)
             self._submit_btn.setVisible(True)
             self._preview_btn.setVisible(True)
             self._session.start_new_match()
             self._session.set_bpm(self.flow.bpm)
             self._bpm.set_value(self.flow.bpm)
+            self._status.setText("")
             self.setFocus(Qt.FocusReason.OtherFocusReason)
+        else:
+            # Remote player is composing; we render a passive wait screen.
+            self._hero.setText("Waiting for Player {}\u2026".format(composer))
+            self._hint.setText("Player {} is creating a rhythm".format(composer))
+            self._duck.set_asset(self._composer_character().asset)
+            self._bpm.setVisible(False)
+            self._submit_btn.setVisible(False)
+            self._preview_btn.setVisible(False)
+            self._status.setText("")
 
-    # ----- host interactions -----------------------------------------------
+    # ----- interactive (composer) hooks -----------------------------------
     def _on_bpm(self, v: int) -> None:
-        if self._is_client_spectator():
+        if not self._is_local_composer():
             return
         self.flow.bpm = int(v)
         self._session.set_bpm(self.flow.bpm)
@@ -181,22 +200,34 @@ class RecreateRhythmP1Page(FlowPage):
         self._track.set_live_pattern(pattern)
 
     def _on_status(self, msg: str) -> None:
-        if self._is_client_spectator():
+        if not self._is_local_composer():
             return
         self._status.setText(msg)
 
     def _submit(self) -> None:
-        if self._is_client_spectator():
+        if not self._is_local_composer():
             return
         ok = self._session.p1_submit()
         if not ok:
-            self._status.setText("Rhythm pad reading not stable yet — hold still and retry.")
+            self._status.setText("Rhythm pad reading not stable yet \u2014 hold still and retry.")
             return
-        # Fire nav first (the MainWindow listener calls nav.go("rr_p2") which
-        # broadcasts MSG_NAV); then send the authoritative reference pattern
-        # so the client's rr_p2 page has it ready before it needs to grade.
+        role = self.flow.network_role
+        if role == NetworkRole.CLIENT:
+            # Client-composer: don't navigate locally \u2014 push the target to the
+            # host, which is authoritative for nav. Host will broadcast
+            # MSG_NAV(rr_p2) which we'll follow.
+            mw = self._main_window()
+            if mw is not None:
+                mw.net.send(
+                    MSG_RR_TARGET,
+                    pattern=list(self._session.p1_pattern),
+                    bpm=int(self.flow.bpm),
+                    round=int(self.flow.current_round),
+                )
+            return
+        # Host-composer or solo: navigate locally, then broadcast target.
         self.submitted.emit()
-        if self.flow.network_role == NetworkRole.HOST:
+        if role == NetworkRole.HOST:
             mw = self._main_window()
             if mw is not None:
                 mw.net.send(
@@ -207,7 +238,7 @@ class RecreateRhythmP1Page(FlowPage):
                 )
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if self._is_client_spectator():
+        if not self._is_local_composer():
             super().keyPressEvent(event)
             return
         if event.key() == Qt.Key.Key_D:

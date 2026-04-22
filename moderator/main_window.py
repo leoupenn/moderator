@@ -394,29 +394,47 @@ class MainWindow(QMainWindow):
                 tc.handle_network_message(msg)
             return
 
-        # Recreate Rhythm handshake: host broadcasts the reference pattern
-        # after it locks P1's rhythm; the client's rr_p2 page seeds its
-        # grading target from it.
-        if kind == MSG_RR_TARGET and self._flow.network_role == NetworkRole.CLIENT:
-            rr2 = self._nav.get("rr_p2")
-            if rr2 is not None and hasattr(rr2, "set_target"):
-                pattern = msg.get("pattern") or []
-                bpm = msg.get("bpm")
-                rr2.set_target(list(pattern), bpm if isinstance(bpm, int) else None)
+        # Recreate Rhythm handshake. Players swap composer / recreator duties
+        # every round so this message can travel in either direction:
+        #   * host receives (client composed, even round) → seed the host's
+        #     session and drive nav so both machines advance together;
+        #   * client receives (host composed, odd round) → forward to the
+        #     rr_p2 page which seeds its grading target.
+        if kind == MSG_RR_TARGET:
+            pattern = list(msg.get("pattern") or [])
+            bpm = msg.get("bpm")
+            bpm_val = int(bpm) if isinstance(bpm, int) and bpm > 0 else None
+            if self._flow.network_role == NetworkRole.HOST:
+                if (
+                    self._flow.mode == GameMode.MULTI
+                    and self._flow.multiplayer_mode
+                    == MultiplayerMode.RECREATE_RHYTHM
+                ):
+                    self._session.set_manual_pattern(pattern)
+                    if bpm_val is not None:
+                        self._flow.bpm = bpm_val
+                        self._session.set_bpm(float(bpm_val))
+                    self._nav.go("rr_p2")
+                return
+            if self._flow.network_role == NetworkRole.CLIENT:
+                rr2 = self._nav.get("rr_p2")
+                if rr2 is not None and hasattr(rr2, "set_target"):
+                    rr2.set_target(pattern, bpm_val)
             return
 
-        # Recreate Rhythm spectator mirror on the host: every client attempt
-        # ships its wordle grid + attempts + elapsed so the host card stays
-        # in lock-step with what P2 sees.
-        if kind == MSG_RR_ATTEMPT and self._flow.network_role == NetworkRole.HOST:
+        # Recreate Rhythm live mirror — the recreator's machine sends this so
+        # the spectator card stays in lock-step. Forward to rr_p2; the page
+        # checks its round-role before applying.
+        if kind == MSG_RR_ATTEMPT:
             rr2 = self._nav.get("rr_p2")
             if rr2 is not None and hasattr(rr2, "apply_remote_attempt"):
                 rr2.apply_remote_attempt(msg)
             return
 
-        # Recreate Rhythm round finished on the client — host records the
-        # score and navigates both machines to the results screen.
-        if kind == MSG_RR_RESULT and self._flow.network_role == NetworkRole.HOST:
+        # Recreate Rhythm round result — host-as-spectator records the score
+        # and triggers nav; client-as-spectator just refreshes its visuals
+        # (the host is authoritative for both).
+        if kind == MSG_RR_RESULT:
             rr2 = self._nav.get("rr_p2")
             if rr2 is not None and hasattr(rr2, "apply_remote_result"):
                 rr2.apply_remote_result(msg)

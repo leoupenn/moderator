@@ -64,6 +64,22 @@ class LevelTier(Enum):
     EXPERT = auto()
 
 
+# ----- Recreate Rhythm role rotation ----------------------------------------
+# Players swap composer / recreator duties every round so Player 2 gets to
+# invent rhythms on even rounds and Player 1 plays the guesser. Round numbers
+# are 1-indexed (``FlowState.current_round`` starts at 1).
+
+
+def rr_composer_player(round_num: int) -> int:
+    """Which player invents the rhythm on ``round_num`` (1-indexed)."""
+    return 1 if int(round_num) % 2 == 1 else 2
+
+
+def rr_recreator_player(round_num: int) -> int:
+    """Which player recreates the rhythm on ``round_num`` (1-indexed)."""
+    return 2 if int(round_num) % 2 == 1 else 1
+
+
 @dataclass
 class RoundScore:
     player1: int = 0  # ms elapsed (Time Challenge) or mode-specific metric

@@ -1,22 +1,23 @@
-"""Figma 21:944 / 30:995 / 30:1027 — Recreate Rhythm P2 view (recreation + feedback).
+"""Figma 21:944 / 30:995 / 30:1027 \u2014 Recreate Rhythm 'recreate' screen.
 
-Role-aware rendering:
+Players swap composer / recreator duties every round (see
+``rr_recreator_player``):
 
-* **Client (Player 2)**: full interactive page — tap pad to build a pattern,
-  K / Return to submit, Space to replay Player 1's rhythm. When the client
-  submits, it grades locally against the target received via
-  ``MSG_RR_TARGET`` and shows the wordle-style grid feedback only on its
-  own screen. Every attempt emits ``MSG_RR_ATTEMPT`` so the host's
-  spectator mirror updates. A final ``MSG_RR_RESULT`` tells the host when
-  to record the score and navigate to results.
-* **Host (Player 1)**: passive spectator mirror. Strip click, keyboard
-  shortcuts, and submit are all disabled ("P1 cannot trigger submit or
-  play rhythms while P2 is recreating"). Timer ticks locally as a smooth
-  visual; authoritative elapsed time comes from the client on every
-  attempt. The host records the ``RoundScore`` on ``MSG_RR_RESULT`` and
-  emits ``round_done`` so ``MainWindow`` navigates both screens to results.
-* **Solo**: unchanged — grades against the session's locally-stored P1
-  pattern from the previous page.
+* **Local recreator**: full interactive page \u2014 the pad drives a fresh
+  pattern, ``K`` / ``Return`` submits, ``Space`` replays the composer's
+  rhythm. Grading is local against the pattern seeded by ``MSG_RR_TARGET``
+  (or by ``GameSession.p1_submit`` on the host when the host composed).
+  Every submit emits ``MSG_RR_ATTEMPT`` so the spectator mirror updates;
+  the final ``MSG_RR_RESULT`` tells the peer the round is over.
+* **Local spectator**: passive mirror. Strip click, submit and keys are
+  disabled so the composer can't grade for the other player. The timer
+  ticks locally for smoothness and re-anchors to every authoritative
+  ``elapsed_ms`` the recreator sends us.
+
+The **host is always authoritative for scoring + navigation**. When the
+host is the recreator it records the ``RoundScore`` locally. When the
+client is the recreator it sends ``MSG_RR_RESULT`` and the host records +
+navigates to the results page.
 """
 from __future__ import annotations
 
@@ -31,11 +32,14 @@ from ...game_logic import (
     Phase,
     SLOTS,
     binary_pattern_for_playback,
-    compare_patterns,
 )
 from ...net import MSG_RR_ATTEMPT, MSG_RR_RESULT
 from ...session import FlowState, GameSession, NetworkRole
-from ...session.flow_state import RoundScore
+from ...session.flow_state import (
+    RoundScore,
+    rr_composer_player,
+    rr_recreator_player,
+)
 from ..theme import DESIGN_W, THEME
 from ..widgets import (
     DuckMascot,
@@ -99,7 +103,7 @@ class RecreateRhythmP2Page(FlowPage):
         self._strip.setObjectName("RhythmStrip")
         self._strip.setGeometry(213, 172, 1086, 95)
         self._strip.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self._strip_lbl = QLabel("Play Player 1's Rhythm…", self._strip)
+        self._strip_lbl = QLabel("Play Player 1's Rhythm\u2026", self._strip)
         self._strip_lbl.setObjectName("StripLabel")
         sl = QFont(THEME.font_display)
         sl.setPixelSize(36)
@@ -180,16 +184,28 @@ class RecreateRhythmP2Page(FlowPage):
         self._tick = QTimer(self)
         self._tick.timeout.connect(self._on_tick)
 
-    # ----- role detection --------------------------------------------------
-    def _is_host_spectator(self) -> bool:
-        return self.flow.network_role == NetworkRole.HOST
+    # ----- role helpers ----------------------------------------------------
+    def _composer_player(self) -> int:
+        return rr_composer_player(self.flow.current_round)
 
-    def _is_client(self) -> bool:
-        return self.flow.network_role == NetworkRole.CLIENT
+    def _recreator_player(self) -> int:
+        return rr_recreator_player(self.flow.current_round)
+
+    def _is_local_recreator(self) -> bool:
+        return self.flow.local_player == self._recreator_player()
+
+    def _is_local_spectator(self) -> bool:
+        return not self._is_local_recreator()
+
+    def _recreator_character(self):
+        return (
+            self.flow.character_p1
+            if self._recreator_player() == 1
+            else self.flow.character_p2
+        )
 
     # ----- lifecycle -------------------------------------------------------
     def on_enter(self) -> None:
-        self._duck.set_asset(self.flow.character_p2.asset)
         self._round_label.setText(f"ROUND {self.flow.current_round}")
         self._round_label.adjustSize()
         self._round_label.move(DESIGN_W - 20 - self._round_label.width(), 88)
@@ -201,19 +217,37 @@ class RecreateRhythmP2Page(FlowPage):
         self._track.clear()
         self._status.setText("")
 
-        if self._is_host_spectator():
-            self._hint_lbl.setText("Player 2 is recreating the rhythm…")
-            self._strip_lbl.setText("Player 2 is playing your rhythm")
+        rec = self._recreator_player()
+        comp = self._composer_player()
+        self._player_title.setText(f"Player {rec}")
+        self._duck.set_asset(self._recreator_character().asset)
+
+        if self._is_local_spectator():
+            self._hint_lbl.setText(
+                f"Player {rec} is recreating the rhythm\u2026"
+            )
+            self._strip_lbl.setText(
+                f"Player {rec} is playing your rhythm"
+            )
             self._play_icon.setVisible(False)
             self._strip.setCursor(Qt.CursorShape.ArrowCursor)
         else:
             self._hint_lbl.setText("Press K to submit")
-            self._strip_lbl.setText("Play Player 1's Rhythm…")
+            self._strip_lbl.setText(
+                f"Play Player {comp}'s Rhythm\u2026"
+            )
             self._play_icon.setVisible(True)
             self._strip.setCursor(Qt.CursorShape.PointingHandCursor)
-            if self._is_client():
-                # Target pattern arrives shortly via MSG_RR_TARGET; until it
-                # does, submits are gated (see _submit).
+            role = self.flow.network_role
+            if role == NetworkRole.HOST:
+                # On host-as-recreator the session's _p1_pattern was already
+                # seeded by the MSG_RR_TARGET handler in MainWindow (or by
+                # a local p1_submit in solo). Mirror it onto _target for the
+                # replay button.
+                self._target = list(self._session.p1_pattern)
+            elif role == NetworkRole.CLIENT:
+                # Client-as-recreator waits for MSG_RR_TARGET \u2014 submits are
+                # gated until it arrives.
                 self._target = None
             else:
                 self._target = list(self._session.p1_pattern)
@@ -222,15 +256,15 @@ class RecreateRhythmP2Page(FlowPage):
         self._tick.start(50)
         self.setFocus(Qt.FocusReason.OtherFocusReason)
 
-    # ----- strip click (Play P1's rhythm) ----------------------------------
+    # ----- strip click (Play composer's rhythm) ----------------------------
     def _strip_clicked(self, _e: QMouseEvent) -> None:
-        if self._is_host_spectator():
+        if self._is_local_spectator():
             return
         self._session.play_reference()
 
     # ----- input -----------------------------------------------------------
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if self._is_host_spectator():
+        if self._is_local_spectator():
             super().keyPressEvent(event)
             return
         if event.key() in (Qt.Key.Key_K, Qt.Key.Key_Return, Qt.Key.Key_Enter):
@@ -248,14 +282,16 @@ class RecreateRhythmP2Page(FlowPage):
         self._time_lbl.setText(_format_ms(self._elapsed_ms))
 
     def _submit(self) -> None:
-        if self._finished or self._is_host_spectator():
+        if self._finished or self._is_local_spectator():
             return
-        if self._is_client() and self._target is None:
-            self._status.setText("Waiting for Player 1's rhythm…")
+        if self.flow.network_role == NetworkRole.CLIENT and self._target is None:
+            self._status.setText("Waiting for Player {}'s rhythm\u2026".format(
+                self._composer_player()
+            ))
             return
         res = self._session.p2_submit()
         if res is None:
-            self._status.setText("Rhythm pad reading not stable yet — hold still and retry.")
+            self._status.setText("Rhythm pad reading not stable yet \u2014 hold still and retry.")
             return
         matches, n_ok = res
         attempt_pattern = binary_pattern_for_playback(self._session.live_state)
@@ -269,25 +305,27 @@ class RecreateRhythmP2Page(FlowPage):
         self._broadcast_attempt(attempt_pattern, matches)
         QTimer.singleShot(900, self._session.feedback_continue)
 
-    # ----- host mirror hooks ----------------------------------------------
+    # ----- remote ingest (spectator mirror / target seed) ------------------
     def set_target(self, pattern: List[int], bpm: Optional[int] = None) -> None:
-        """Called on the CLIENT when MSG_RR_TARGET arrives from the host."""
-        if not self._is_client():
+        """Seed the grading reference.
+
+        Called on whichever machine is the recreator after the other side's
+        ``MSG_RR_TARGET`` arrives (and on the host directly via the
+        ``MSG_RR_TARGET`` handler when the client composed).
+        """
+        if not self._is_local_recreator():
             return
         self._target = list(pattern)
-        # Seed the session so play_reference and p2_submit both grade against
-        # the same reference the host locked in.
         self._session.set_manual_pattern(list(pattern))
         if isinstance(bpm, int) and bpm > 0:
             self._session.set_bpm(bpm)
-        # Reset visible state on fresh target (covers reconnect/replay).
         self._attempts = 1
         self._attempt_lbl.setText("Attempt 1")
         self._track.clear()
 
     def apply_remote_attempt(self, msg: dict) -> None:
-        """Called on the HOST when MSG_RR_ATTEMPT arrives from the client."""
-        if not self._is_host_spectator() or self._finished:
+        """Incoming ``MSG_RR_ATTEMPT`` \u2014 update the spectator card."""
+        if not self._is_local_spectator() or self._finished:
             return
         try:
             attempts = int(msg.get("attempts", self._attempts))
@@ -299,16 +337,23 @@ class RecreateRhythmP2Page(FlowPage):
         self._attempt_lbl.setText(f"Attempt {self._attempts}")
         self._elapsed_ms = max(0, elapsed_ms)
         self._time_lbl.setText(_format_ms(self._elapsed_ms))
-        # Re-anchor the local spectator tick so the number continues upward
-        # from the authoritative value instead of snapping back on the next
-        # 50 ms tick.
+        # Re-anchor the spectator tick so the number keeps climbing smoothly
+        # from the authoritative value instead of snapping backwards.
         self._match_start = time.monotonic() - (self._elapsed_ms / 1000.0)
         if isinstance(matches, list) and len(matches) == SLOTS:
             self._track.set_feedback([bool(v) for v in matches])
 
     def apply_remote_result(self, msg: dict) -> None:
-        """Called on the HOST when MSG_RR_RESULT arrives from the client."""
-        if not self._is_host_spectator() or self._finished:
+        """Incoming ``MSG_RR_RESULT``.
+
+        Behavior depends on the local role:
+
+        * Host spectator (client was the recreator): record the
+          authoritative ``RoundScore`` and navigate to results.
+        * Client spectator (host was the recreator): refresh visuals only \u2014
+          the host drives both the score and the ``MSG_NAV``.
+        """
+        if not self._is_local_spectator() or self._finished:
             return
         win = bool(msg.get("win", False))
         try:
@@ -324,88 +369,89 @@ class RecreateRhythmP2Page(FlowPage):
         self._time_lbl.setText(_format_ms(self._elapsed_ms))
         if not win:
             self._track.set_feedback([False] * SLOTS)
-        winner = 2 if win else 1
-        score = RoundScore(
-            player1=0,
-            player2=self._elapsed_ms,
-            winner=winner,
-            attempts_p1=1,
-            attempts_p2=self._attempts,
-        )
-        self.flow.scores.append(score)
-        QTimer.singleShot(1200, self.round_done.emit)
 
-    # ----- result handling (local path on solo + client) -------------------
+        if self.flow.network_role == NetworkRole.HOST:
+            self._record_score_for_round(win=win)
+            QTimer.singleShot(1200, self.round_done.emit)
+
+    # ----- result handling (local path) ------------------------------------
     def _finish(self, *, win: bool, matches: List[bool]) -> None:
         self._finished = True
         self._tick.stop()
         self._track.set_feedback(matches)
-        winner = 2 if win else 1
-        score = RoundScore(
-            player1=0,
-            player2=self._elapsed_ms,
-            winner=winner,
-            attempts_p1=1,
-            attempts_p2=int(self._attempts),
-        )
-        # Client doesn't append to its own flow.scores — the host owns the
-        # authoritative score and rebroadcasts state after appending.
-        if not self._is_client():
-            self.flow.scores.append(score)
         self._broadcast_result(win=win)
-        if self._is_client():
-            # Host drives navigation via results MSG_NAV after it records the
-            # score; the client just waits.
-            return
-        QTimer.singleShot(1200, self.round_done.emit)
+        role = self.flow.network_role
+        if role == NetworkRole.HOST or role == NetworkRole.SOLO:
+            # Authoritative side records the score and drives nav.
+            self._record_score_for_round(win=win)
+            QTimer.singleShot(1200, self.round_done.emit)
+        # Client recreator: host will append to flow.scores and broadcast
+        # MSG_STATE + MSG_NAV. Nothing else to do locally.
+
+    def _record_score_for_round(self, *, win: bool) -> None:
+        """Append an authoritative ``RoundScore`` for this round.
+
+        The recreator's player number owns ``attempts_p*`` and the elapsed
+        time; the composer row is left at sensible defaults so the results
+        card still renders cleanly for both players.
+        """
+        rec = self._recreator_player()
+        winner = rec if win else self._composer_player()
+        attempts_p1 = self._attempts if rec == 1 else 1
+        attempts_p2 = self._attempts if rec == 2 else 1
+        player1 = self._elapsed_ms if rec == 1 else 0
+        player2 = self._elapsed_ms if rec == 2 else 0
+        self.flow.scores.append(
+            RoundScore(
+                player1=player1,
+                player2=player2,
+                winner=winner,
+                attempts_p1=attempts_p1,
+                attempts_p2=attempts_p2,
+            )
+        )
 
     def _on_live(self, pattern: list) -> None:
-        if self._is_host_spectator():
+        if self._is_local_spectator():
             return
         self._track.set_live_pattern(pattern)
 
     def _on_feedback(self, matches: list, _n_ok: int) -> None:
-        if self._is_host_spectator():
+        if self._is_local_spectator():
             return
         self._track.set_feedback(matches)
 
     def _on_round_won(self) -> None:
-        if self._is_host_spectator():
+        if self._is_local_spectator():
             return
         self._track.set_feedback([True] * SLOTS)
 
     def _on_round_lost(self, _reference: list) -> None:
-        if self._is_host_spectator() or self._finished:
+        if self._is_local_spectator() or self._finished:
             return
-        # Too many failed attempts — P1 wins this round.
+        # MAX_FAILED_ATTEMPTS reached \u2014 composer wins this round.
         self._finished = True
         self._tick.stop()
         self._track.set_feedback([False] * SLOTS)
-        score = RoundScore(
-            player1=0,
-            player2=self._elapsed_ms,
-            winner=1,
-            attempts_p1=1,
-            attempts_p2=int(self._attempts),
-        )
-        if not self._is_client():
-            self.flow.scores.append(score)
         self._broadcast_result(win=False)
-        if self._is_client():
-            return
-        QTimer.singleShot(1200, self.round_done.emit)
+        role = self.flow.network_role
+        if role == NetworkRole.HOST or role == NetworkRole.SOLO:
+            self._record_score_for_round(win=False)
+            QTimer.singleShot(1200, self.round_done.emit)
 
     def _on_phase(self, _phase: Phase) -> None:
         pass
 
     def _on_status(self, msg: str) -> None:
-        if self._is_host_spectator():
+        if self._is_local_spectator():
             return
         self._status.setText(msg)
 
     # ----- wire helpers ----------------------------------------------------
     def _broadcast_attempt(self, pattern: List[int], matches: List[bool]) -> None:
-        if not self._is_client():
+        if self.flow.network_role == NetworkRole.SOLO:
+            return
+        if not self._is_local_recreator():
             return
         mw = self._main_window()
         if mw is None:
@@ -419,7 +465,9 @@ class RecreateRhythmP2Page(FlowPage):
         )
 
     def _broadcast_result(self, *, win: bool) -> None:
-        if not self._is_client():
+        if self.flow.network_role == NetworkRole.SOLO:
+            return
+        if not self._is_local_recreator():
             return
         mw = self._main_window()
         if mw is None:
