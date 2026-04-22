@@ -7,6 +7,7 @@ from .competition_page import CompetitionPage
 from .introduction_page import IntroductionPage
 from .leaderboard_page import LeaderboardPage
 from .levels_page import LevelsPage
+from .expert_tutorial import EXPERT_FLOW
 from .loading_page import LoadingPage
 from .novice_tutorial import NOVICE_FLOW
 from .recreate_rhythm_p1_page import RecreateRhythmP1Page
@@ -27,6 +28,7 @@ __all__ = [
     "IntroductionPage",
     "LeaderboardPage",
     "LevelsPage",
+    "EXPERT_FLOW",
     "LoadingPage",
     "NOVICE_FLOW",
     "RecreateRhythmP1Page",

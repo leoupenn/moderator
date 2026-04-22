@@ -144,6 +144,26 @@ class NoviceTutorialBase(FlowPage):
             self._continue.raise_()
 
 
+def _layout_body_with_side_tempo(
+    page: NoviceTutorialBase,
+    tempo: BpmInput,
+    *,
+    body_width: int = 670,
+    body_height: int | None = None,
+    gap_px: int = 22,
+) -> None:
+    """Narrow the body copy and sit the BPM pill on the same row (right side).
+
+    The old ``(989, 215)`` placement overlapped the wide body panel; Figma
+    hardware frames keep **Tempo** beside the narrative instead.
+    """
+    y = 258
+    h = body_height if body_height is not None else page._body_label.height()
+    page._body_label.setGeometry(244, y, body_width, h)
+    tempo.move(244 + body_width + gap_px, y)
+    tempo.raise_()
+
+
 # ---------------------------------------------------------------------------
 # Frame 1 — Welcome to Tutorial (83:1328)
 # ---------------------------------------------------------------------------
@@ -313,8 +333,8 @@ class NoviceMetronomePage(NoviceTutorialBase, _MetronomePageMixin):
         )
 
         self._tempo = BpmInput(initial=80, parent=self)
-        self._tempo.move(989, 215)
         self._tempo.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        _layout_body_with_side_tempo(self, self._tempo, body_width=670, body_height=100)
 
         self._init_metronome(bpm=80, play_audio=True, show_eighths=True)
         self._tempo.value_changed.connect(self._engine.set_bpm)
@@ -363,7 +383,7 @@ class NoviceTryTheTempoPage(NoviceTutorialBase, _MetronomePageMixin):
         self._bottom_circles = []
 
         self._tempo = BpmInput(initial=80, parent=self)
-        self._tempo.move(989, 215)
+        _layout_body_with_side_tempo(self, self._tempo, body_width=670, body_height=100)
 
         self._init_metronome(bpm=80, play_audio=True, show_eighths=False)
         self._tempo.value_changed.connect(self._engine.set_bpm)
@@ -632,7 +652,9 @@ class _HardwareCountRowPage(NoviceTutorialBase, _MetronomePageMixin):
 
         if with_tempo:
             self._tempo = BpmInput(initial=bpm, parent=self)
-            self._tempo.move(989, 215)
+            _layout_body_with_side_tempo(
+                self, self._tempo, body_width=600, body_height=130
+            )
         else:
             self._tempo = None
 
@@ -838,8 +860,33 @@ class NoviceTrial1Page(NoviceTutorialBase):
         hint.move((DESIGN_W - 900) // 2, 720)
 
 
+class _LegendDot(QWidget):
+    """Solid filled disc used for the correct/incorrect legend swatches.
+
+    Deliberately not a ``CountCircle`` — on this page we want the whole circle
+    flooded with the feedback color instead of the beat-ring + inner-dot layout
+    the gameplay circles use.
+    """
+
+    def __init__(self, color: str, diameter: int = 120, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(diameter, diameter)
+        self._color = QColor(color)
+
+    def paintEvent(self, _event) -> None:  # noqa: D401 - Qt override
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setBrush(self._color)
+        p.setPen(QColor(0, 0, 0, 30))
+        p.drawEllipse(1, 1, self.width() - 2, self.height() - 2)
+        p.end()
+
+
 class NoviceTrial2Page(NoviceTutorialBase):
     """Explains grid feedback: green = slot matches target, red = slot does not."""
+
+    _LEGEND_CORRECT = "#A2CEAB"
+    _LEGEND_INCORRECT = "#F9B5B5"
 
     def __init__(self, flow: FlowState, parent: QWidget | None = None) -> None:
         super().__init__(
@@ -852,20 +899,18 @@ class NoviceTrial2Page(NoviceTutorialBase):
         )
         self._body_label.setGeometry(244, 258, 1143, 140)
 
-        # Inline legend: only correct (green) vs incorrect (red).
         legend = QWidget(self)
         legend.setFixedSize(1000, 160)
         legend.move((DESIGN_W - 1000) // 2, 560)
         legend.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         samples = [
-            (CountCircle.STATE_HIT, "Correct"),
-            (CountCircle.STATE_MISS, "Incorrect"),
+            (self._LEGEND_CORRECT, "Correct"),
+            (self._LEGEND_INCORRECT, "Incorrect"),
         ]
         slot_w = 1000 // len(samples)
-        for i, (state, label) in enumerate(samples):
-            c = CountCircle("", 120, parent=legend)
-            c.set_state(state)
-            c.move(i * slot_w + (slot_w - 120) // 2, 0)
+        for i, (color, label) in enumerate(samples):
+            dot = _LegendDot(color, 120, parent=legend)
+            dot.move(i * slot_w + (slot_w - 120) // 2, 0)
             lbl = QLabel(label.upper(), legend)
             lbl.setStyleSheet(
                 f"color: {THEME.white}; font-family: '{THEME.font_display}'; "

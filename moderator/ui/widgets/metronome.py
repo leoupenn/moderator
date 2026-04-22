@@ -15,8 +15,8 @@ from __future__ import annotations
 import time
 from typing import List
 
-from PySide6.QtCore import QIODevice, QObject, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QPainter
+from PySide6.QtCore import QIODevice, QObject, QTimer, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
 from PySide6.QtWidgets import QWidget
 
@@ -201,11 +201,20 @@ class MetronomeEngine(QObject):
 class CountCircle(QWidget):
     """Circular beat indicator used on every metronome-style tutorial screen.
 
-    States:
-      * ``idle``   — white fill, ghosted stroke
-      * ``on``     — accent-blue fill (the currently-playing beat)
-      * ``hit``    — green flash (player nailed an on-tempo spacebar press)
-      * ``miss``   — red flash (player missed)
+    The widget is drawn in three layers so the "current beat" indicator and
+    the "on tempo? / off tempo?" feedback never overlap:
+
+      1. a white disc (always visible),
+      2. an optional blue ring sitting just inside the outer edge, shown when
+         this circle is the active beat,
+      3. an optional smaller inner disc (green for a hit, red for a miss) that
+         flashes when the player presses space.
+
+    States combine those layers:
+      * ``idle``   — white disc only.
+      * ``on``     — white disc + blue ring (the currently-playing beat).
+      * ``hit``    — white disc + blue ring + small green inner disc.
+      * ``miss``   — white disc + blue ring + small red inner disc.
 
     Caller decides what ``label`` to render ("1", "and", etc.). The circle
     is a plain painted widget so it can live anywhere on the canvas without
@@ -217,12 +226,20 @@ class CountCircle(QWidget):
     STATE_HIT = "hit"
     STATE_MISS = "miss"
 
+    _BASE_COLOR = QColor("#FFFFFF")
+    _RING_COLOR = QColor("#94C4D8")
+
     _COLORS = {
-        STATE_IDLE: QColor("#FFFFFF"),
-        STATE_ON: QColor("#94C4D8"),
+        STATE_IDLE: _BASE_COLOR,
+        STATE_ON: _RING_COLOR,
         STATE_HIT: QColor("#A2CEAB"),
         STATE_MISS: QColor("#F9B5B5"),
     }
+
+    # Ring thickness + inner-disc diameter expressed as fractions of the widget
+    # diameter so the look scales with the circle's pixel size.
+    _RING_THICKNESS_FRAC = 0.10
+    _INNER_DIAMETER_FRAC = 0.48
 
     def __init__(
         self,
@@ -255,14 +272,46 @@ class CountCircle(QWidget):
     def paintEvent(self, _event) -> None:  # noqa: D401 - Qt override
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        color = self._COLORS[self._state]
-        p.setBrush(color)
+
+        w, h = self.width(), self.height()
+        p.setBrush(self._BASE_COLOR)
         p.setPen(QColor(0, 0, 0, 30))
-        p.drawEllipse(1, 1, self.width() - 2, self.height() - 2)
+        p.drawEllipse(1, 1, w - 2, h - 2)
+
+        state = self._state
+        show_ring = state in (self.STATE_ON, self.STATE_HIT, self.STATE_MISS)
+        feedback_color: QColor | None = None
+        if state == self.STATE_HIT:
+            feedback_color = self._COLORS[self.STATE_HIT]
+        elif state == self.STATE_MISS:
+            feedback_color = self._COLORS[self.STATE_MISS]
+
+        if show_ring:
+            thickness = max(4, int(round(h * self._RING_THICKNESS_FRAC)))
+            pen = QPen(self._RING_COLOR, thickness)
+            pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            inset = thickness / 2 + 1
+            p.drawEllipse(
+                int(inset),
+                int(inset),
+                int(w - 2 * inset),
+                int(h - 2 * inset),
+            )
+
+        if feedback_color is not None:
+            inner_d = max(8, int(round(h * self._INNER_DIAMETER_FRAC)))
+            off_x = (w - inner_d) // 2
+            off_y = (h - inner_d) // 2
+            p.setBrush(feedback_color)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(off_x, off_y, inner_d, inner_d)
+
         if self._label:
             p.setPen(self._text_color)
             f = QFont("Jersey 10")
-            f.setPixelSize(max(24, int(self.height() * 0.38)))
+            f.setPixelSize(max(24, int(h * 0.38)))
             p.setFont(f)
             p.drawText(self.rect(), 0x0084, self._label)  # AlignCenter
         p.end()

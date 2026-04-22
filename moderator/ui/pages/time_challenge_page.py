@@ -1,42 +1,59 @@
-"""Figma 21:477 / 45:789 — Time Challenge gameplay (MP head-to-head + SP variant).
+"""Figma 113:2822 (Player 1) / 115:3177 (Player 2) — Time Challenge gameplay.
 
-Uses GameSession for pad input / audio. Each round picks a target pattern from
-a per-level library; the timer tracks how long the player takes to match it
-(or, in SP, to recreate the phrase). Lower elapsed time = winner.
+Refresh of the original head-to-head layout:
 
-When FlowState.network_role is HOST / CLIENT, the page operates as a
-networked match:
+* Header ("COMPETITIVE MODE" / "Time Challenge" / "ROUND N") unchanged.
+* Rhythm strip (1086×130 white pill at y=172) with a play icon on the right —
+  clicking the strip plays the target rhythm locally.
+* Two player cards (450×561), gray for P1 and yellow for P2, each stacking
+  Player title · timer digits · attempt counter · submit hint.
+* A single "Play Your Rhythm" orange pill sits inside the *local* player's
+  card (P1 for host / solo, P2 for client) so each machine has its own
+  play-reference control. Playback stays local — no network broadcast.
+* The 8-cell RhythmTrackGrid and the standalone "Play target" / "Skip"
+  buttons from the old layout are gone. Skip / force-finish is still
+  reachable via the ``N`` keyboard shortcut for testing.
+
+Networking behaviour is otherwise identical to the previous revision:
 
 - Host owns the round timer, picks the target, and computes the authoritative
   winner. It runs P1 locally and waits for the client's ``submit`` / timeout
   for P2.
 - Client renders the host's state. It runs P2 locally (reading its own
   controller) and pushes submits + live pattern updates back to the host.
-  Skip / Play target also work on the client: they send control messages
-  the host executes authoritatively.
-
-The shared clock is a host-issued ``start_epoch_ms``. The host anchors
-against its own ``time.time()``; the client translates the host's epoch into
-its local clock frame using ``NetworkManager.host_to_local_ms`` (NTP-style
-offset measured at connect time). If that offset hasn't been sampled yet,
-the client falls back to anchoring on the arrival time of ``MSG_START_ROUND``
-— this trades the old wall-clock drift for sub-second one-way network
-latency so two machines with skewed OS clocks still show the same timer.
+- The shared clock is still a host-issued ``start_epoch_ms`` translated into
+  the client's local frame via ``NetworkManager.host_to_local_ms``.
 """
 from __future__ import annotations
 
 import time
 from typing import List, Optional
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QFont, QKeyEvent
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
+from PySide6.QtCore import QPointF, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QCursor,
+    QFont,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+    QPen,
+    QPolygonF,
+)
+from PySide6.QtWidgets import (
+    QFrame,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ...game_logic import Phase, SLOTS, binary_pattern_for_playback, compare_patterns
 from ...net import (
     MSG_ATTEMPTS_UPDATE,
     MSG_INPUT_PATTERN,
-    MSG_PLAY_REFERENCE,
     MSG_ROUND_RESULT,
     MSG_START_ROUND,
     MSG_SUBMIT,
@@ -46,16 +63,11 @@ from ...session import FlowState, GameMode, GameSession, NetworkRole
 from ...session.flow_state import LevelTier, RoundScore
 from ..theme import DESIGN_W, THEME
 from ..widgets import (
-    ChoiceButton,
-    ChoiceStyle,
     DuckMascot,
     FlowPage,
-    RhythmTrackGrid,
 )
 
 
-# Multiplayer cycles through both variants per tier. Single-player uses only
-# the first pattern per tier (genre maps to a tier; one play per run).
 _LEVEL_PATTERNS: dict[LevelTier, List[List[int]]] = {
     LevelTier.EASY: [
         [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
@@ -74,6 +86,15 @@ _LEVEL_PATTERNS: dict[LevelTier, List[List[int]]] = {
 
 _BIG_PENALTY_MS = 10 * 60 * 1000  # 10-minute penalty for unfinished submits
 
+# Colors specific to the Time Challenge refresh (Figma 113:2822 / 115:3177).
+# Kept local instead of bolted onto THEME because P1's card turning gray is a
+# Time Challenge choice, not a global palette change.
+_PLAYER1_CARD_BG = "#BFC0BF"
+_PLAYER2_CARD_BG = THEME.accent_yellow  # "#DFC22C"
+_PLAY_RHYTHM_ORANGE = "#E48706"
+_PLAY_RHYTHM_ORANGE_HOVER = "#F29823"
+_PLAY_RHYTHM_ORANGE_PRESSED = "#C27405"
+
 
 def _format_ms(ms: int) -> str:
     total_s = ms // 1000
@@ -83,50 +104,166 @@ def _format_ms(ms: int) -> str:
     return f"{m:02d}:{s:02d}:{cs:02d}"
 
 
+class _PlayButton(QPushButton):
+    """Orange "Play Your Rhythm" pill that lives inside a player's card."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__("Play Your Rhythm", parent)
+        self.setObjectName("PlayYourRhythmBtn")
+        self.setFixedSize(316, 54)
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        f = QFont(THEME.font_display)
+        f.setPixelSize(32)
+        self.setFont(f)
+        # Local stylesheet — none of the global pill rules match the exact
+        # orange/size from the new design, so we scope it to this button.
+        # Horizontal padding is kept tight so the long label isn't clipped
+        # on systems that substitute a wider font for Jersey 10.
+        self.setStyleSheet(
+            "QPushButton#PlayYourRhythmBtn {"
+            f"  background: {_PLAY_RHYTHM_ORANGE};"
+            "   color: white;"
+            "   border: none;"
+            "   border-radius: 27px;"
+            "   padding: 0 18px;"
+            "}"
+            "QPushButton#PlayYourRhythmBtn:hover {"
+            f"  background: {_PLAY_RHYTHM_ORANGE_HOVER};"
+            "}"
+            "QPushButton#PlayYourRhythmBtn:pressed {"
+            f"  background: {_PLAY_RHYTHM_ORANGE_PRESSED};"
+            "}"
+        )
+
+
+class _PlayDuotoneIcon(QWidget):
+    """Small play icon for the rhythm strip (dark circle + white triangle).
+
+    Matches Figma ``Play_duotone`` (21:602) without pulling in a dedicated
+    SVG asset. Painted manually so it scales with whatever size we hand it.
+    """
+
+    def __init__(self, diameter: int, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(diameter, diameter)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def paintEvent(self, _event: QPaintEvent) -> None:
+        d = float(min(self.width(), self.height()))
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # Outer circle — a muted slate matching Figma's `#2A4157` token.
+        p.setPen(QPen(Qt.PenStyle.NoPen))
+        p.setBrush(QBrush(QColor("#2A4157")))
+        p.drawEllipse(QPointF(d / 2, d / 2), d / 2, d / 2)
+
+        # Right-pointing triangle centred on the circle, slightly biased
+        # right to feel visually balanced.
+        t_h = d * 0.40
+        t_w = t_h * 0.88
+        cx = d / 2 + d * 0.04
+        cy = d / 2
+        tri = QPolygonF(
+            [
+                QPointF(cx - t_w / 2, cy - t_h / 2),
+                QPointF(cx + t_w / 2, cy),
+                QPointF(cx - t_w / 2, cy + t_h / 2),
+            ]
+        )
+        p.setBrush(QBrush(QColor("#FFFFFF")))
+        p.drawPolygon(tri)
+        p.end()
+
+
 class _PlayerCard(QFrame):
-    def __init__(self, name: str, accent_blue: bool) -> None:
-        super().__init__()
-        self.setObjectName("CardBlue" if accent_blue else "CardYellow")
-        self.setFixedSize(450, 410)
+    """A 450×561 stacked card (title / time / attempt / optional play / hint).
+
+    ``variant`` is ``"p1"`` or ``"p2"`` and picks the background + default
+    submit hint wording. ``show_play_button`` wires in the orange "Play Your
+    Rhythm" pill on the machine that owns this card.
+    """
+
+    play_rhythm = Signal()
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        variant: str,
+        show_play_button: bool,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setFixedSize(450, 561)
+        bg = _PLAYER1_CARD_BG if variant == "p1" else _PLAYER2_CARD_BG
+        self.setStyleSheet(
+            f"QFrame {{ background: {bg}; border-radius: 20px; border: none; }}"
+        )
 
         col = QVBoxLayout(self)
-        col.setContentsMargins(36, 18, 36, 24)
-        col.setSpacing(8)
+        # Figma inset: pt=20, pl=65, pr=57, pb=42. The pl/pr are symmetric on
+        # content so we average them; the hint sits 471px from the top which
+        # leaves ~48px to the bottom after its 48px height.
+        col.setContentsMargins(65, 20, 57, 42)
+        col.setSpacing(0)
 
-        self.player_title = QLabel(name)
+        self.player_title = QLabel(name, self)
         self.player_title.setObjectName("PlayerTitle")
-        pf = QFont(THEME.font_display)
-        pf.setPixelSize(44)
-        self.player_title.setFont(pf)
+        ptf = QFont(THEME.font_display)
+        ptf.setPixelSize(48)
+        self.player_title.setFont(ptf)
         self.player_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         col.addWidget(self.player_title)
 
-        col.addStretch(1)
+        col.addSpacing(84)  # Figma gap between title and timer block
 
-        self.time_lbl = QLabel("00:00:00")
-        self.time_lbl.setObjectName("TimeDigits")
+        self.time_lbl = QLabel("00:00:00", self)
+        self.time_lbl.setObjectName("TimeDigitsBig")
         tf = QFont(THEME.font_display)
-        tf.setPixelSize(80)
+        tf.setPixelSize(128)
+        tf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 6.4)
         self.time_lbl.setFont(tf)
         self.time_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         col.addWidget(self.time_lbl)
 
-        self.attempt_lbl = QLabel("Attempt 1")
+        col.addSpacing(10)
+
+        self.attempt_lbl = QLabel("Attempt 1", self)
         self.attempt_lbl.setObjectName("AttemptLabel")
         af = QFont(THEME.font_display)
-        af.setPixelSize(40)
+        af.setPixelSize(64)
         self.attempt_lbl.setFont(af)
         self.attempt_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         col.addWidget(self.attempt_lbl)
 
         col.addStretch(1)
 
-        self.submit_hint = QLabel("Press D to submit")
+        if show_play_button:
+            self.play_btn: Optional[_PlayButton] = _PlayButton(self)
+            self.play_btn.clicked.connect(self.play_rhythm.emit)
+            btn_row = QFrame(self)
+            btn_row.setStyleSheet("background: transparent;")
+            brl = QVBoxLayout(btn_row)
+            brl.setContentsMargins(0, 0, 0, 0)
+            brl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+            brl.addWidget(self.play_btn, 0, Qt.AlignmentFlag.AlignHCenter)
+            col.addWidget(btn_row)
+            col.addSpacing(14)
+        else:
+            self.play_btn = None
+
+        default_hint = "Press D to Submit" if variant == "p1" else "Press K to Submit"
+        self.submit_hint = QLabel(default_hint, self)
         self.submit_hint.setObjectName("SubmitHint")
-        sf = QFont(THEME.font_display)
-        sf.setPixelSize(28)
+        sf = QFont(THEME.font_numeric)
+        sf.setPixelSize(48)
         self.submit_hint.setFont(sf)
         self.submit_hint.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        # Match the Figma `#33363F` slate for the submit hint.
+        self.submit_hint.setStyleSheet(
+            f"color: {THEME.slate}; background: transparent;"
+        )
         col.addWidget(self.submit_hint)
 
     def set_time_ms(self, ms: int) -> None:
@@ -175,52 +312,51 @@ class TimeChallengePage(FlowPage):
         self._round_label.adjustSize()
         self._round_label.move(DESIGN_W - 220, 88)
 
-        strip = QFrame(self)
-        strip.setObjectName("RhythmStrip")
-        strip.setGeometry(213, 172, 1086, 130)
-        strip_lbl = QLabel("Play the rhythm...", strip)
-        strip_lbl.setObjectName("StripLabel")
+        # ----- rhythm strip (clickable, plays reference locally) ----------
+        self._strip = QFrame(self)
+        self._strip.setObjectName("RhythmStrip")
+        self._strip.setGeometry(213, 172, 1086, 130)
+        self._strip.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._strip.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._strip.mousePressEvent = self._on_strip_clicked  # type: ignore[assignment]
+
+        self._strip_label = QLabel("Play the Rhythm...", self._strip)
+        self._strip_label.setObjectName("StripLabel")
         ssf = QFont(THEME.font_display)
         ssf.setPixelSize(40)
-        strip_lbl.setFont(ssf)
-        strip_lbl.adjustSize()
-        strip_lbl.move(50, 45)
-        self._strip_label = strip_lbl
+        self._strip_label.setFont(ssf)
+        self._strip_label.move(47, 45)
+        self._strip_label.adjustSize()
 
-        self._track = RhythmTrackGrid(
-            self, width=1086, height=96, cell_size=(96, 72), cell_radius=12
+        self._play_icon = _PlayDuotoneIcon(80, self._strip)
+        # Absolute 1180,197 on the page -> relative (1180-213, 197-172) = (967, 25).
+        self._play_icon.move(967, 25)
+
+        # ----- player cards ----------------------------------------------
+        role = flow.network_role
+        local_is_p1 = role in (NetworkRole.SOLO, NetworkRole.HOST)
+        self._p1_card = _PlayerCard(
+            "Player 1", variant="p1", show_play_button=local_is_p1, parent=self
         )
-        self._track.move(213, 310)
+        self.place(self._p1_card, 213, 361)
+        if self._p1_card.play_btn is not None:
+            self._p1_card.play_rhythm.connect(self._on_play_clicked)
 
-        self._p1_card = _PlayerCard("Player 1", accent_blue=True)
-        self.place(self._p1_card, 213, 420)
-
-        self._p2_card = _PlayerCard("Player 2", accent_blue=False)
-        self.place(self._p2_card, 849, 420)
-        self._p2_card.submit_hint.setText("Press K to submit")
+        self._p2_card = _PlayerCard(
+            "Player 2", variant="p2", show_play_button=(role == NetworkRole.CLIENT),
+            parent=self,
+        )
+        self.place(self._p2_card, 849, 361)
+        if self._p2_card.play_btn is not None:
+            self._p2_card.play_rhythm.connect(self._on_play_clicked)
 
         p1_duck = DuckMascot(flow.character_p1.asset, 124, 137, self)
-        p1_duck.move(154, 372)
+        p1_duck.move(154, 313)
         self._p1_duck = p1_duck
 
         p2_duck = DuckMascot(flow.character_p2.asset, 124, 137, self)
-        p2_duck.move(1220, 372)
+        p2_duck.move(1220, 313)
         self._p2_duck = p2_duck
-
-        # Bottom controls: play reference + force-end round.
-        play_btn = ChoiceButton("Play target", ChoiceStyle.DARK, width=220, height=64, parent=self)
-        pf = QFont(THEME.font_display)
-        pf.setPixelSize(28)
-        play_btn.setFont(pf)
-        play_btn.move(213, 870)
-        play_btn.clicked.connect(self._on_play_clicked)
-        self._play_btn = play_btn
-
-        skip_btn = ChoiceButton("Skip / Next round", ChoiceStyle.BLUE, width=320, height=64, parent=self)
-        skip_btn.setFont(pf)
-        skip_btn.move(979, 870)
-        skip_btn.clicked.connect(self._on_skip_clicked)
-        self._next_btn = skip_btn
 
         # Round state. Timings stored in ms. ``elapsed_ms_local_pN`` is what
         # each *machine* measured for that player; the host copy wins when
@@ -239,7 +375,6 @@ class TimeChallengePage(FlowPage):
         self._tick.timeout.connect(self._on_tick)
 
         session.live_pattern_changed.connect(self._on_live_pattern)
-        session.feedback_ready.connect(self._on_feedback)
         session.round_won.connect(self._on_round_won)
         session.phase_changed.connect(self._on_phase)
 
@@ -257,10 +392,6 @@ class TimeChallengePage(FlowPage):
         self.setFocus(Qt.FocusReason.OtherFocusReason)
 
         role = self.flow.network_role
-        # Both machines show Play / Skip; the client asks the host to perform
-        # the authoritative action over the wire.
-        self._next_btn.setVisible(True)
-        self._play_btn.setVisible(True)
 
         if role == NetworkRole.CLIENT:
             # Clients wait for the host to push ``start_round`` before their
@@ -268,6 +399,7 @@ class TimeChallengePage(FlowPage):
             # — that's the host's job.
             self._reset_round_visuals()
             self._strip_label.setText("Waiting for host…")
+            self._strip_label.adjustSize()
             return
 
         self._start_round_as_host()
@@ -302,8 +434,8 @@ class TimeChallengePage(FlowPage):
         self._tick.start(50)
 
     def _reset_round_visuals(self) -> None:
-        self._track.clear()
-        self._strip_label.setText("Play the rhythm...")
+        self._strip_label.setText("Play the Rhythm...")
+        self._strip_label.adjustSize()
         self._elapsed_ms_p1 = 0
         self._elapsed_ms_p2 = 0
         self._p1_done = False
@@ -378,8 +510,12 @@ class TimeChallengePage(FlowPage):
             elif role == NetworkRole.HOST:
                 self._submit_for(2)
         elif key == Qt.Key.Key_Space:
-            if role in (NetworkRole.SOLO, NetworkRole.HOST, NetworkRole.CLIENT):
-                self._on_play_clicked()
+            self._on_play_clicked()
+        elif key == Qt.Key.Key_N:
+            # Debug / fallback skip (the visible button from the old layout
+            # is gone in the new design). Host/solo forces the round to end;
+            # a client nudges the host via MSG_TIME_CHALLENGE_CONTROL.
+            self._on_skip_requested()
         else:
             super().keyPressEvent(event)
 
@@ -395,13 +531,7 @@ class TimeChallengePage(FlowPage):
 
         if role == NetworkRole.CLIENT:
             # Client only submits P2 via the network; host is the sole judge.
-            # Show feedback on this machine's grid only — the host UI is P1's
-            # view and should not flash the miss/hit pattern of P2's attempt.
             attempt = binary_pattern_for_playback(self._session.live_state)
-            matches, n_ok = compare_patterns(self._last_target, list(attempt))
-            self._track.set_feedback(matches)
-            if n_ok != SLOTS:
-                QTimer.singleShot(950, self._track.clear)
             mw = self._main_window()
             if mw is not None:
                 mw.net.send(
@@ -414,31 +544,22 @@ class TimeChallengePage(FlowPage):
 
         # Solo or host-local submit → route through GameSession so that LED
         # feedback, audio, and the phase state machine behave exactly as they
-        # did pre-networking.
+        # did pre-networking. The 8-cell visual feedback grid is gone from
+        # this layout, but the hardware still gets its red/green per-slot
+        # frame via ``GameSession.p2_submit``.
         res = self._session.p2_submit()
         if res is None:
             return
-        matches, n_ok = res
+        _matches, n_ok = res
         if n_ok == SLOTS:
             self._complete_player(player)
         else:
             self._bump_attempts(player)
-            # This is the host's own P1 submit (or a solo run) — showing
-            # feedback on the local grid is correct because the submitter is
-            # sitting in front of this machine.
-            self._track.set_feedback(matches)
             QTimer.singleShot(900, self._session.feedback_continue)
-            QTimer.singleShot(950, self._track.clear)
 
     def _score_submission(self, player: int, attempt: List[int]) -> None:
-        """Host-side authoritative scoring of a remote (client) attempt.
-
-        The visual feedback grid is intentionally *not* touched here: the
-        submitter is the client and it paints the miss/hit pattern on its
-        own machine. Painting it here would show P1 a flash that belongs to
-        P2's screen.
-        """
-        matches, n_ok = compare_patterns(self._last_target, attempt)
+        """Host-side authoritative scoring of a remote (client) attempt."""
+        _matches, n_ok = compare_patterns(self._last_target, attempt)
         if n_ok == SLOTS:
             self._complete_player(player)
             return
@@ -451,6 +572,7 @@ class TimeChallengePage(FlowPage):
         else:
             self._p2_done = True
             self._strip_label.setText("Player 2 got it!")
+        self._strip_label.adjustSize()
         done_condition = (
             self._p1_done
             if self.flow.mode == GameMode.SINGLE
@@ -504,7 +626,8 @@ class TimeChallengePage(FlowPage):
             )
         self.flow.scores.append(score)
 
-    def _on_skip_clicked(self) -> None:
+    # ----- skip (keyboard only; the old on-screen button is gone) ---------
+    def _on_skip_requested(self) -> None:
         if self.flow.network_role == NetworkRole.CLIENT:
             mw = self._main_window()
             if mw is not None:
@@ -525,29 +648,32 @@ class TimeChallengePage(FlowPage):
             self._p2_done = True
         self._lock_and_finish_round()
 
-    # ----- reference audio -------------------------------------------------
+    # ----- reference audio (local playback per machine) --------------------
+    def _on_strip_clicked(self, _e: QMouseEvent) -> None:
+        self._on_play_clicked()
+
     def _on_play_clicked(self) -> None:
-        if self.flow.network_role == NetworkRole.CLIENT:
-            mw = self._main_window()
-            if mw is not None:
-                mw.net.send(MSG_TIME_CHALLENGE_CONTROL, action="play_reference")
-            return
-        self.host_apply_play_reference()
+        # New design: each player presses their own "Play Your Rhythm"
+        # pill and hears the reference *on their own machine only*. No
+        # network broadcast — pressing play shouldn't blast audio at your
+        # opponent mid-submit.
+        self._session.play_reference()
 
     def host_apply_play_reference(self) -> None:
-        """Host-only: play audio locally and tell the client to do the same."""
+        """Legacy network hook — kept so older clients still get audio.
+
+        The new design drops the shared "Play target" button in favour of
+        per-player controls, so this is only called if a peer running an
+        older build sends ``MSG_TIME_CHALLENGE_CONTROL {action: play_reference}``.
+        """
         self._session.play_reference()
-        mw = self._main_window()
-        if mw is not None:
-            mw.net.send(MSG_PLAY_REFERENCE)
 
     def host_apply_force_finish(self) -> None:
-        """Host-only: force-end invoked from the network (P2's Skip button)."""
+        """Host-only: force-end invoked from the network (``N`` on P2's machine)."""
         self._force_finish_round()
 
     # ----- session signal plumbing -----------------------------------------
     def _on_live_pattern(self, pattern: list) -> None:
-        self._track.set_live_pattern(pattern)
         # Clients forward their live pad state so the host can echo it (so P1's
         # screen can optionally visualise P2's attempt in future work).
         if self.flow.network_role == NetworkRole.CLIENT and not self._round_locked:
@@ -557,11 +683,10 @@ class TimeChallengePage(FlowPage):
                     MSG_INPUT_PATTERN, player=2, pattern=list(pattern[:SLOTS])
                 )
 
-    def _on_feedback(self, matches: list, _n_ok: int) -> None:
-        self._track.set_feedback(matches)
-
     def _on_round_won(self) -> None:
-        self._track.set_feedback([True] * SLOTS)
+        # The 8-cell grid flash is gone; the per-player strip banner in
+        # _complete_player already announces which player got it.
+        pass
 
     def _on_phase(self, _phase: Phase) -> None:
         pass
@@ -579,11 +704,6 @@ class TimeChallengePage(FlowPage):
             host_start_epoch_ms = int(
                 msg.get("start_epoch_ms", time.time() * 1000)
             )
-            # Translate the host's epoch into this machine's ``time.time()``
-            # frame. If the NTP-style offset has landed, apply it so both
-            # sides count the same elapsed. Otherwise anchor on arrival so
-            # the client's display tracks its own clock (off by ~one-way
-            # latency, not by the raw wall-clock skew between OS clocks).
             mw = self._main_window()
             if mw is not None and mw.net.is_clock_synced:
                 local_start_ms = mw.net.host_to_local_ms(host_start_epoch_ms)
@@ -599,16 +719,10 @@ class TimeChallengePage(FlowPage):
             self._begin_round(target[:SLOTS], local_start_ms)
             return
 
-        if kind == MSG_PLAY_REFERENCE and role == NetworkRole.CLIENT:
-            self._session.play_reference()
-            return
-
         if kind == MSG_SUBMIT and role == NetworkRole.HOST:
             player = int(msg.get("player", 2))
             pattern = msg.get("pattern") or []
             if player == 2 and not self._p2_done and not self._round_locked:
-                # Pin the authoritative elapsed time at the moment we process
-                # the submit rather than trusting ``client_elapsed_ms``.
                 self._elapsed_ms_p2 = self._current_elapsed_ms()
                 self._p2_card.set_time_ms(self._elapsed_ms_p2)
                 self._score_submission(2, list(pattern[:SLOTS]))
@@ -645,8 +759,6 @@ class TimeChallengePage(FlowPage):
             self.flow.scores.append(score)
             self._round_locked = True
             self._tick.stop()
-            # The host will follow up with a nav to "results"; client simply
-            # waits for it — no local round_complete emission needed.
             return
 
     # ----- helpers ---------------------------------------------------------

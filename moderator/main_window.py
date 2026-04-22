@@ -42,6 +42,7 @@ from .session.flow_state import Character, LevelTier, level_tier_for_single_play
 from .ui import AppNavigator, DESIGN_H, DESIGN_W, FIGMA_FILE_URL, load_app_stylesheet
 from .ui.theme import THEME
 from .ui.pages import (
+    EXPERT_FLOW,
     NOVICE_FLOW,
     CharacterChoiceP1Page,
     CharacterChoiceP2WaitingPage,
@@ -60,6 +61,10 @@ from .ui.pages import (
     TimeChallengePage,
     TutorialPage,
     WelcomePage,
+)
+from .ui.pages.expert_tutorial import (
+    ExpertIntroCoverPage,
+    ExpertTryAgainPage,
 )
 from .ui.pages.novice_tutorial import NoviceWelcomeIntroPage
 from .ui.settings_dialog import SettingsDialog
@@ -140,26 +145,44 @@ class MainWindow(QMainWindow):
         self._nav.register("rr_p2", lambda: self._page_rr_p2())
         self._nav.register("results", lambda: self._page_results())
         self._nav.register("leaderboard", lambda: self._page_leaderboard())
-        self._register_novice_routes()
+        self._register_tutorial_chain(NOVICE_FLOW)
+        self._register_tutorial_chain(EXPERT_FLOW)
 
-    def _register_novice_routes(self) -> None:
-        """Register the 16 novice tutorial pages + chain their Continue CTAs."""
-        for idx, (route, cls) in enumerate(NOVICE_FLOW):
+    def _register_tutorial_chain(self, flow_pages: list[tuple[str, type]]) -> None:
+        """Register a novice/expert chain, wiring each page's CTA to the next.
+
+        * Cover pages (``NoviceWelcomeIntroPage`` / ``ExpertIntroCoverPage``)
+          emit ``ready_clicked`` + ``skip_clicked`` — we connect both.
+        * ``ExpertTryAgainPage`` has an extra ``back_clicked`` signal that
+          returns to the previous page (``Trial 1``).
+        * Everything else uses ``continue_clicked``.
+        """
+        for idx, (route, cls) in enumerate(flow_pages):
             next_route = (
-                NOVICE_FLOW[idx + 1][0] if idx + 1 < len(NOVICE_FLOW) else "sp_character"
+                flow_pages[idx + 1][0]
+                if idx + 1 < len(flow_pages)
+                else "sp_character"
             )
+            prev_route = flow_pages[idx - 1][0] if idx > 0 else None
 
-            def factory(cls=cls, route=route, next_route=next_route):
+            def factory(
+                cls=cls, route=route, next_route=next_route, prev_route=prev_route
+            ):
                 page = cls(self._flow)
                 self._bind_help(page)
-                # First page uses ready_clicked; rest use continue_clicked.
-                if isinstance(page, NoviceWelcomeIntroPage):
-                    page.ready_clicked.connect(lambda nr=next_route: self._nav.go(nr))
+                if isinstance(page, (NoviceWelcomeIntroPage, ExpertIntroCoverPage)):
+                    page.ready_clicked.connect(
+                        lambda nr=next_route: self._nav.go(nr)
+                    )
                     page.skip_clicked.connect(lambda: self._nav.go("sp_character"))
                 else:
                     page.continue_clicked.connect(
                         lambda nr=next_route: self._nav.go(nr)
                     )
+                    if isinstance(page, ExpertTryAgainPage) and prev_route:
+                        page.back_clicked.connect(
+                            lambda pr=prev_route: self._nav.go(pr)
+                        )
                 return page
 
             self._nav.register(route, factory)
@@ -199,13 +222,13 @@ class MainWindow(QMainWindow):
         return p
 
     def _on_tutorial_difficulty(self, difficulty) -> None:
-        """Novice players go through the full 16-screen walkthrough first."""
+        """Route the chosen skill level into its full tutorial walkthrough."""
         from .session.flow_state import Difficulty
 
         if difficulty == Difficulty.NOVICE:
             self._nav.go(NOVICE_FLOW[0][0])
         else:
-            self._nav.go("sp_character")
+            self._nav.go(EXPERT_FLOW[0][0])
 
     def _page_sp_experience(self) -> SinglePlayerExperiencePage:
         p = SinglePlayerExperiencePage(self._flow)
