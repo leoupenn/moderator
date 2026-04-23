@@ -72,31 +72,31 @@ def matches_to_neopixel_rgb(matches: List[bool]) -> List[Tuple[int, int, int]]:
     return [neopixel_rgb_for_feedback_led(matches, k) for k in range(NEOPIXEL_FEEDBACK_COUNT)]
 
 
+def _format_neopixel_m_line(colors: List[Tuple[int, int, int]]) -> str:
+    """
+    Single-line ``M r0 g0 b0 ... r7 g7 b7`` frame for note_detector.ino.
+
+    One USB line produces exactly one ``strip.show()`` on the device. The
+    firmware parser rejects the line atomically if it arrives short (e.g. a
+    USB-CDC packet split mid-frame), so a truncated write leaves the
+    previous image showing instead of half-updating the strip.
+    """
+    if len(colors) != NEOPIXEL_FEEDBACK_COUNT:
+        raise ValueError(f"Need {NEOPIXEL_FEEDBACK_COUNT} RGB triples")
+    nums = [str(v) for rgb in colors for v in rgb]
+    return "M " + " ".join(nums) + "\n"
+
+
 def format_neopixel_feedback_serial(matches: List[bool]) -> str:
-    """
-    note_detector.ino frame (no ``M`` batch):
-      ``C`` — clear strip buffer; eight ``P k r g b`` (k = 0..7); ``S`` — latch to LEDs.
-    """
-    lines: List[str] = ["C"]
-    for led_index in range(NEOPIXEL_FEEDBACK_COUNT):
-        r, g, b = neopixel_rgb_for_feedback_led(matches, led_index)
-        lines.append(f"P {led_index} {r} {g} {b}")
-    lines.append("S")
-    return "\n".join(lines) + "\n"
+    """Single-line ``M`` frame painting the eight feedback LEDs red/green."""
+    return _format_neopixel_m_line(matches_to_neopixel_rgb(matches))
 
 
 def format_neopixel_all_green_serial() -> str:
-    lines: List[str] = ["C"]
-    for led_index in range(NEOPIXEL_FEEDBACK_COUNT):
-        lines.append(f"P {led_index} 0 255 0")
-    lines.append("S")
-    return "\n".join(lines) + "\n"
+    """Single-line ``M`` frame with every feedback LED green (perfect round)."""
+    return _format_neopixel_m_line([(0, 255, 0)] * NEOPIXEL_FEEDBACK_COUNT)
 
 
 def format_neopixel_clear_serial() -> str:
-    """Clear buffer then black out all eight feedback LEDs, then show."""
-    lines: List[str] = ["C"]
-    for k in range(NEOPIXEL_FEEDBACK_COUNT):
-        lines.append(f"P {k} 0 0 0")
-    lines.append("S")
-    return "\n".join(lines) + "\n"
+    """Single-line ``M`` frame blacking out all eight feedback LEDs."""
+    return _format_neopixel_m_line([(0, 0, 0)] * NEOPIXEL_FEEDBACK_COUNT)

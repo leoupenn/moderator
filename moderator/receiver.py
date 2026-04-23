@@ -1,4 +1,4 @@
-"""Thread-safe NeoPixel commands: ``C`` + 8× ``P k r g b`` + ``S`` via ``send_led()``."""
+"""Thread-safe NeoPixel commands: single-line ``M`` batch via ``send_led()``."""
 
 from __future__ import annotations
 
