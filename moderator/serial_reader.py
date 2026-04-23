@@ -69,6 +69,9 @@ class SerialReaderWorker(QObject):
             try:
                 self._flush_writes()
                 raw = self._ser.readline().decode("utf-8", errors="ignore")
+                if raw:
+                    # readline() returns "" on timeout — skip those to avoid terminal spam
+                    print(raw.rstrip("\r\n"), flush=True)
                 parsed = parse_line(raw)
                 if parsed is not None:
                     self.frame.emit(parsed)
