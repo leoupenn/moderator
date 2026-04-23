@@ -74,10 +74,8 @@ def matches_to_neopixel_rgb(matches: List[bool]) -> List[Tuple[int, int, int]]:
 
 def format_neopixel_feedback_serial(matches: List[bool]) -> str:
     """
-    Per-pixel serial frame for note_detector.ino (no M batch):
-      C              — clear strip buffer
-      P k r g b      — set feedback LED k (0..7); device maps k → strip via LED_MAP
-      S              — latch to LEDs
+    note_detector.ino frame (no ``M`` batch):
+      ``C`` — clear strip buffer; eight ``P k r g b`` (k = 0..7); ``S`` — latch to LEDs.
     """
     lines: List[str] = ["C"]
     for led_index in range(NEOPIXEL_FEEDBACK_COUNT):
@@ -88,7 +86,7 @@ def format_neopixel_feedback_serial(matches: List[bool]) -> str:
 
 
 def format_neopixel_all_green_serial() -> str:
-    lines = ["C"]
+    lines: List[str] = ["C"]
     for led_index in range(NEOPIXEL_FEEDBACK_COUNT):
         lines.append(f"P {led_index} 0 255 0")
     lines.append("S")
@@ -96,4 +94,9 @@ def format_neopixel_all_green_serial() -> str:
 
 
 def format_neopixel_clear_serial() -> str:
-    return "C\nS\n"
+    """Clear buffer then black out all eight feedback LEDs, then show."""
+    lines: List[str] = ["C"]
+    for k in range(NEOPIXEL_FEEDBACK_COUNT):
+        lines.append(f"P {k} 0 0 0")
+    lines.append("S")
+    return "\n".join(lines) + "\n"

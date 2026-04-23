@@ -4,7 +4,7 @@ Refresh of the original head-to-head layout:
 
 * Header ("COMPETITIVE MODE" / "Time Challenge" / "ROUND N") unchanged.
 * Rhythm strip (1086×130 white pill at y=172) with a play icon on the right —
-  clicking the strip plays the target rhythm locally after a one-bar (four
+  clicking the strip plays the **local** pad-built rhythm after a one-bar (four
   quarter-note) metronome count-in, same as the orange ``Play Your Rhythm`` pill.
 * Two player cards (450×561), gray for P1 and yellow for P2, each stacking
   Player title · timer digits · attempt counter · submit hint.
@@ -318,7 +318,7 @@ class TimeChallengePage(FlowPage):
         self._round_label.adjustSize()
         self._round_label.move(DESIGN_W - 220, 88)
 
-        # ----- rhythm strip (clickable, plays reference locally) ----------
+        # ----- rhythm strip (clickable, plays local pad pattern) -----------
         self._strip = QFrame(self)
         self._strip.setObjectName("RhythmStrip")
         self._strip.setGeometry(213, 172, 1086, 130)
@@ -659,20 +659,20 @@ class TimeChallengePage(FlowPage):
         self._on_play_clicked()
 
     def _on_play_clicked(self) -> None:
-        # New design: each player presses their own "Play Your Rhythm"
-        # pill and hears the reference *on their own machine only*. No
-        # network broadcast — pressing play shouldn't blast audio at your
-        # opponent mid-submit.
-        self._session.play_reference(count_in_quarters=DEFAULT_COUNT_IN_QUARTERS)
+        # Each machine previews the **connected controller** pattern (live
+        # pads), not the round target — host hears P1's build, client hears
+        # P2's. No network broadcast.
+        self._session.play_current(count_in_quarters=DEFAULT_COUNT_IN_QUARTERS)
 
     def host_apply_play_reference(self) -> None:
-        """Legacy network hook — kept so older clients still get audio.
+        """Legacy network hook — kept so older clients still trigger local audio.
 
         The new design drops the shared "Play target" button in favour of
         per-player controls, so this is only called if a peer running an
         older build sends ``MSG_TIME_CHALLENGE_CONTROL {action: play_reference}``.
+        Match current behaviour: play this machine's live pad pattern.
         """
-        self._session.play_reference(count_in_quarters=DEFAULT_COUNT_IN_QUARTERS)
+        self._session.play_current(count_in_quarters=DEFAULT_COUNT_IN_QUARTERS)
 
     def host_apply_force_finish(self) -> None:
         """Host-only: force-end invoked from the network (``N`` on P2's machine)."""

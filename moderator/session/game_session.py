@@ -26,8 +26,6 @@ from ..game_logic import (
     SLOTS,
     binary_pattern_for_playback,
     compare_patterns,
-    format_neopixel_all_green_serial,
-    format_neopixel_clear_serial,
     normalize_pattern,
 )
 from ..phrase_audio import (
@@ -36,7 +34,6 @@ from ..phrase_audio import (
     render_held_sine_phrase,
 )
 from ..receiver import send_led as receiver_send_led
-from ..receiver import send_m_line as receiver_send_m_line
 from ..serial_parser import validate_sensed_pattern
 from ..serial_reader import SerialReaderWorker, start_reader_thread
 
@@ -153,7 +150,7 @@ class GameSession(QObject):
         self.phase_changed.emit(self._phase)
         self.attempts_changed.emit(self._failed_attempts)
         self.live_pattern_changed.emit(list(self._state))
-        self._safe_send(format_neopixel_clear_serial())
+        self.status_changed.emit(receiver_send_led(self._worker, preset="clear"))
 
     def p1_submit(self) -> bool:
         """Lock P1 pattern and advance to P2 phase. False if read not stable."""
@@ -199,13 +196,13 @@ class GameSession(QObject):
         matches, n_ok = compare_patterns(self._p1_pattern, attempt)
         self._last_matches = matches
         if n_ok == SLOTS:
-            self._safe_send(format_neopixel_all_green_serial())
+            self.status_changed.emit(receiver_send_led(self._worker, preset="all_green"))
             self._phase = Phase.ROUND_WON
             self.phase_changed.emit(self._phase)
             self.round_won.emit()
             return matches, n_ok
         self._failed_attempts += 1
-        self._safe_send_led(matches)
+        self.status_changed.emit(receiver_send_led(self._worker, matches))
         self._phase = Phase.FEEDBACK
         self.phase_changed.emit(self._phase)
         self.feedback_ready.emit(matches, n_ok)
@@ -259,12 +256,6 @@ class GameSession(QObject):
             return
         self._sensing_stable = stable
         self.sensing_stable_changed.emit(stable)
-
-    def _safe_send(self, line: str) -> None:
-        self.status_changed.emit(receiver_send_m_line(self._worker, line))
-
-    def _safe_send_led(self, matches: List[bool]) -> None:
-        self.status_changed.emit(receiver_send_led(self._worker, matches))
 
     # ----- audio playback --------------------------------------------------
     def _step_duration_s(self) -> float:

@@ -3,7 +3,7 @@
 
   Input:  prints state each loop as "[0, 1, 0, ...]" (16 values, commas+spaces).
   Output: PC → device
-            • Frame (recommended):  C  then  P k r g b  (×8, k = feedback 0..7)  then  S
+            • Frame (recommended):  C  then  P k r g b  (×8)  then  S
             • M-batch (optional):   M r0 g0 b0 ... r7 g7 b7
             • Legacy (one LED):     idx r g b   (see setLED; clears strip)
 
@@ -114,7 +114,7 @@ static void applyMLine(const String& line) {
   strip.show();
 }
 
-/* Set one feedback LED (k = 0..7) without clear/show — C … P … S frame from host. */
+/* Set one feedback LED (k = 0..7) in buffer — host follows with ``S`` to latch. */
 static void applyPixelLine(const String& line) {
   const char* p = line.c_str();
   if (tolower((unsigned char)*p) == 'p') p++;
