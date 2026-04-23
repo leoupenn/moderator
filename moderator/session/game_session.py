@@ -33,7 +33,7 @@ from ..phrase_audio import (
     prepend_quarter_count_in_to_phrase,
     render_held_sine_phrase,
 )
-from ..receiver import send_led as receiver_send_led
+from ..receiver import send_led_strip as receiver_send_led
 from ..serial_parser import validate_sensed_pattern
 from ..serial_reader import SerialReaderWorker, start_reader_thread
 

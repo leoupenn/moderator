@@ -3,11 +3,9 @@
 
   Input:  prints state each loop as "[0, 1, 0, ...]" (16 values, commas+spaces).
   Output: PC → device
-            • M-batch (recommended):  M r0 g0 b0 ... r7 g7 b7  (one line; atomic)
-            • Frame (debug):          C  then  P k r g b  (×8)  then  S
-                                       S only shows if 8 P lines were accepted
-                                       since the last C (else "led_drop …")
-            • Legacy (one LED):       idx r g b   (see setLED; clears strip)
+            • Frame (recommended):  C  then  P k r g b  (×8)  then  S
+            • M-batch (optional):   M r0 g0 b0 ... r7 g7 b7
+            • Legacy (one LED):     idx r g b   (see setLED; clears strip)
 
   Place Adafruit_MPR121.cpp and Adafruit_MPR121.h in this folder (or use Library Manager).
   Based on note_detector XIAO ESP32-C3 + MPR121 ×2 + NeoPixel strip.
@@ -116,11 +114,8 @@ static void applyMLine(const String& line) {
   strip.show();
 }
 
-/* Set one feedback LED (k = 0..7) in buffer — host follows with ``S`` to latch.
- * Returns true when a valid feedback index was written, so the caller can
- * count accepted P lines between C and S.
- */
-static bool applyPixelLine(const String& line) {
+/* Set one feedback LED (k = 0..7) in buffer — host follows with ``S`` to latch. */
+static void applyPixelLine(const String& line) {
   const char* p = line.c_str();
   if (tolower((unsigned char)*p) == 'p') p++;
   while (*p && isspace((unsigned char)*p)) p++;
@@ -130,9 +125,7 @@ static bool applyPixelLine(const String& line) {
   long b = parseLongAdv(p);
   if (fb >= 0 && fb < 8) {
     setMappedFeedbackPixel((int)fb, r, g, b);
-    return true;
   }
-  return false;
 }
 
 static void applyLegacyLine(const String& line) {
@@ -200,18 +193,6 @@ void printState() {
 }
 
 void readLEDCommand() {
-  /*
-   * Completeness guard for the C / P×8 / S path:
-   *   S only latches the strip if a preceding C was seen and exactly eight
-   *   valid P lines arrived in between. A truncated or out-of-order frame
-   *   (e.g. a USB-CDC packet split) leaves the previous image on the strip
-   *   and logs "led_drop sawC=... p=..." for host-side debugging.
-   * The M path is atomic (see parseMLine24) and does not interact with
-   * these counters.
-   */
-  static bool    sawClear = false;
-  static uint8_t pCount   = 0;
-
   while (Serial.available()) {
     int c = Serial.read();
     if (c == '\r') continue;
@@ -221,29 +202,14 @@ void readLEDCommand() {
         char h = s_hostLine.charAt(0);
         if (h == 'M' || h == 'm') {
           applyMLine(s_hostLine);
-          sawClear = false;
-          pCount = 0;
         } else if (s_hostLine == "C") {
           strip.clear();
-          sawClear = true;
-          pCount = 0;
         } else if (s_hostLine == "S") {
-          if (sawClear && pCount == 8) {
-            strip.show();
-          } else {
-            Serial.print("led_drop sawC=");
-            Serial.print((int)sawClear);
-            Serial.print(" p=");
-            Serial.println((unsigned)pCount);
-          }
-          sawClear = false;
-          pCount = 0;
+          strip.show();
         } else if (h == 'P' || h == 'p') {
-          if (applyPixelLine(s_hostLine) && pCount < 8) pCount++;
+          applyPixelLine(s_hostLine);
         } else {
           applyLegacyLine(s_hostLine);
-          sawClear = false;
-          pCount = 0;
         }
       }
       s_hostLine = "";

@@ -24,6 +24,7 @@ from PySide6.QtGui import QFont, QKeyEvent
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
 from ...net import MSG_RR_TARGET
+from ...phrase_audio import DEFAULT_COUNT_IN_QUARTERS
 from ...session import FlowState, GameSession, NetworkRole
 from ...session.flow_state import rr_composer_player
 from ..theme import DESIGN_W, THEME
@@ -134,7 +135,7 @@ class RecreateRhythmP1Page(FlowPage):
         )
         self._preview_btn.setFont(tbf)
         self._preview_btn.move((DESIGN_W - 220) // 2 - 150, 800)
-        self._preview_btn.clicked.connect(session.play_current)
+        self._preview_btn.clicked.connect(self._preview_own_rhythm)
 
         session.live_pattern_changed.connect(self._on_live)
         session.status_changed.connect(self._on_status)
@@ -204,6 +205,15 @@ class RecreateRhythmP1Page(FlowPage):
             return
         self._status.setText(msg)
 
+    def _preview_own_rhythm(self) -> None:
+        """Preview live pad pattern; one measure count-in on each player's first compose turn (round 1 for P1, round 2 for P2)."""
+        if not self._is_local_composer():
+            return
+        composer = self._composer_player()
+        first_compose_round = composer  # odd rounds: P1 from 1; even: P2 from 2
+        n = DEFAULT_COUNT_IN_QUARTERS if self.flow.current_round == first_compose_round else 0
+        self._session.play_current(count_in_quarters=n)
+
     def _submit(self) -> None:
         if not self._is_local_composer():
             return
@@ -244,7 +254,7 @@ class RecreateRhythmP1Page(FlowPage):
         if event.key() == Qt.Key.Key_D:
             self._submit()
         elif event.key() == Qt.Key.Key_Space:
-            self._session.play_current()
+            self._preview_own_rhythm()
         else:
             super().keyPressEvent(event)
 
