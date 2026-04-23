@@ -3,7 +3,7 @@
 
   Input:  prints state each loop as "[0, 1, 0, ...]" (16 values, commas+spaces).
   Output: PC → device
-            • Frame (recommended):  C  then  P phys r g b  (×8)  then  S
+            • Frame (recommended):  C  then  P k r g b  (×8, k = feedback 0..7)  then  S
             • M-batch (optional):   M r0 g0 b0 ... r7 g7 b7
             • Legacy (one LED):     idx r g b   (see setLED; clears strip)
 
@@ -30,7 +30,9 @@
  * If LEDs flicker randomly, try NEO_KHZ400 instead of NEO_KHZ800.
  */
 #ifndef MODERATOR_NEOPIXEL_TYPE
-#define MODERATOR_NEOPIXEL_TYPE (NEO_GRB + NEO_KHZ800)
+// Many generic strips used with this project are RGB order.
+// If red/green look swapped, override back to NEO_GRB in your build flags.
+#define MODERATOR_NEOPIXEL_TYPE (NEO_RGB + NEO_KHZ800)
 #endif
 
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, MODERATOR_NEOPIXEL_TYPE);
@@ -92,10 +94,12 @@ static bool parseMLine24(const String& line, long rgb[24]) {
 /* Same code path for feedback indices 0..7 as for index 0 (LED_MAP[k]). */
 static void setMappedFeedbackPixel(int feedbackIndex, long r, long g, long b) {
   if (feedbackIndex < 0 || feedbackIndex >= 8) return;
+  uint8_t phys = LED_MAP[feedbackIndex];
+  if (phys >= LED_COUNT) return;
   r = constrain(r, 0, 255);
   g = constrain(g, 0, 255);
   b = constrain(b, 0, 255);
-  strip.setPixelColor(LED_MAP[feedbackIndex], strip.Color((uint8_t)r, (uint8_t)g, (uint8_t)b));
+  strip.setPixelColor(phys, strip.Color((uint8_t)r, (uint8_t)g, (uint8_t)b));
 }
 
 static void applyMLine(const String& line) {
@@ -110,20 +114,17 @@ static void applyMLine(const String& line) {
   strip.show();
 }
 
-/* Set one physical pixel without clear/show — use C … P … S frame from host. */
+/* Set one feedback LED (k = 0..7) without clear/show — C … P … S frame from host. */
 static void applyPixelLine(const String& line) {
   const char* p = line.c_str();
   if (tolower((unsigned char)*p) == 'p') p++;
   while (*p && isspace((unsigned char)*p)) p++;
-  long phys = parseLongAdv(p);
+  long fb = parseLongAdv(p);
   long r = parseLongAdv(p);
   long g = parseLongAdv(p);
   long b = parseLongAdv(p);
-  if (phys >= 0 && phys < LED_COUNT) {
-    r = constrain(r, 0, 255);
-    g = constrain(g, 0, 255);
-    b = constrain(b, 0, 255);
-    strip.setPixelColor((uint16_t)phys, strip.Color((uint8_t)r, (uint8_t)g, (uint8_t)b));
+  if (fb >= 0 && fb < 8) {
+    setMappedFeedbackPixel((int)fb, r, g, b);
   }
 }
 

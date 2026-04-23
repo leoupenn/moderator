@@ -120,7 +120,7 @@ The section below is a **prototype iteration log** from build sessions (not a fu
 
 ## Current serial protocol (host → device)
 
-Documented in the firmware header: [`firmware/note_detector/note_detector.ino`](firmware/note_detector/note_detector.ino) (lines 1–12). The recommended frame is **`C`**, then eight **`P <phys> r g b`** lines, then **`S`**. The Python helper that builds it is [`format_neopixel_feedback_serial`](moderator/game_logic.py) in [`moderator/game_logic.py`](moderator/game_logic.py) (lines 85–100).
+Documented in the firmware header: [`firmware/note_detector/note_detector.ino`](firmware/note_detector/note_detector.ino) (lines 1–12). The recommended frame is **`C`**, then eight **`P <k> r g b`** lines with **feedback index `k` = 0..7**, then **`S`**. The Python helper that builds it is [`format_neopixel_feedback_serial`](moderator/game_logic.py) in [`moderator/game_logic.py`](moderator/game_logic.py).
 
 ---
 
@@ -187,13 +187,12 @@ Incomplete `M …` lines (e.g. early newline) used to parse the first RGB triple
 
 ### 6 — `C` / `P` / `S` protocol (replace Python `M` batch) — **Major**
 
-Host sends a multi-line frame: clear buffer, set each physical pixel explicitly, then show. Python maps logical feedback slots 0..7 to physical indices via `NEOPIXEL_PHYSICAL_INDICES` (and optional reversal).
+Host sends a multi-line frame: clear buffer, set each feedback LED **k = 0..7**, then show. The device maps **k** to the strip with **`LED_MAP`** in the sketch (linear strip: identity mapping; sparse layouts: edit `LED_MAP` only on the device).
 
 **Code today**
 
-- Indices: [`NEOPIXEL_REVERSE_STRIP`](moderator/game_logic.py) (lines 11–12), [`_feedback_physical_indices`](moderator/game_logic.py) (lines 15–17), [`NEOPIXEL_PHYSICAL_INDICES`](moderator/game_logic.py) (lines 20–21).
-- Frame builder: [`format_neopixel_feedback_serial`](moderator/game_logic.py) (lines 85–100); also [`format_neopixel_all_green_serial`](moderator/game_logic.py) (lines 103–109), [`format_neopixel_clear_serial`](moderator/game_logic.py) (lines 112–113).
-- Firmware: [`applyPixelLine`](firmware/note_detector/note_detector.ino) (lines 113–128); [`readLEDCommand`](firmware/note_detector/note_detector.ino) (lines 202–207) for `C`, `S`, and `P`.
+- Frame builder: [`format_neopixel_feedback_serial`](moderator/game_logic.py); also [`format_neopixel_all_green_serial`](moderator/game_logic.py), [`format_neopixel_clear_serial`](moderator/game_logic.py).
+- Firmware: [`applyPixelLine`](firmware/note_detector/note_detector.ino) → [`setMappedFeedbackPixel`](firmware/note_detector/note_detector.ino); [`readLEDCommand`](firmware/note_detector/note_detector.ino) for `C`, `S`, and `P`.
 
 ---
 
@@ -221,11 +220,10 @@ Briefly, non-perfect grades stepped through LEDs one per second, then cleared. T
 
 ### 9 — Hardware alignment toggles — **Minor**
 
-Strip **color order** (GRB vs RGB) and **data-in direction** vs logical slot order.
+Strip **color order** (GRB vs RGB) and **which physical pixel** each logical feedback **k** uses (via **`LED_MAP`** on the device).
 
 **Code today**
 
-- Python: [`NEOPIXEL_REVERSE_STRIP`](moderator/game_logic.py) (lines 11–21).
 - Firmware: [`MODERATOR_NEOPIXEL_TYPE`](firmware/note_detector/note_detector.ino) (lines 25–36); NeoPixel constructor (line 36). Optional sparse wiring: [`LED_MAP`](firmware/note_detector/note_detector.ino) (lines 47–48).
 
 ---

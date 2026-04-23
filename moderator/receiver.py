@@ -1,4 +1,4 @@
-"""Thread-safe NeoPixel commands to the serial worker (C / P i r g b / S frames)."""
+"""Thread-safe NeoPixel commands to the serial worker (C / P k r g b / S frames, k = 0..7)."""
 
 from __future__ import annotations
 

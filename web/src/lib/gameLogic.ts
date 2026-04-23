@@ -4,15 +4,6 @@ export const SLOTS = 16;
 export const MAX_FAILED_ATTEMPTS = 5;
 export const NEOPIXEL_FEEDBACK_COUNT = 8;
 
-export const NEOPIXEL_REVERSE_STRIP = false;
-
-function feedbackPhysicalIndices(): number[] {
-  const r = Array.from({ length: NEOPIXEL_FEEDBACK_COUNT }, (_, i) => i);
-  return NEOPIXEL_REVERSE_STRIP ? r.reverse() : r;
-}
-
-export const NEOPIXEL_PHYSICAL_INDICES: readonly number[] = feedbackPhysicalIndices();
-
 export type Phase =
   | "P1_INPUT"
   | "P2_INPUT"
@@ -79,14 +70,10 @@ export function matchesToNeopixelRgb(
 }
 
 export function formatNeopixelFeedbackSerial(matches: boolean[]): string {
-  if (NEOPIXEL_PHYSICAL_INDICES.length !== NEOPIXEL_FEEDBACK_COUNT) {
-    throw new Error("NEOPIXEL_PHYSICAL_INDICES must have 8 entries");
-  }
   const lines: string[] = ["C"];
   for (let ledIndex = 0; ledIndex < NEOPIXEL_FEEDBACK_COUNT; ledIndex++) {
     const [r, g, b] = neopixelRgbForFeedbackLed(matches, ledIndex);
-    const phys = NEOPIXEL_PHYSICAL_INDICES[ledIndex];
-    lines.push(`P ${phys} ${r} ${g} ${b}`);
+    lines.push(`P ${ledIndex} ${r} ${g} ${b}`);
   }
   lines.push("S");
   return `${lines.join("\n")}\n`;

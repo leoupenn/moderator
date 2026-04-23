@@ -6,19 +6,9 @@ from typing import List, Literal, Tuple
 
 SLOTS = 16
 MAX_FAILED_ATTEMPTS = 5
-# note_detector.ino exposes 8 logical NeoPixels (pairs of S/E slots share one LED)
+# note_detector.ino exposes 8 logical NeoPixels (pairs of S/E slots share one LED).
+# Serial frames use feedback indices 0..7; firmware maps via LED_MAP to strip pixels.
 NEOPIXEL_FEEDBACK_COUNT = 8
-# If feedback slot 0 lights the wrong end of the strip, set True (DIN on the “far” side).
-NEOPIXEL_REVERSE_STRIP: bool = False
-
-
-def _feedback_physical_indices() -> Tuple[int, ...]:
-    r = range(NEOPIXEL_FEEDBACK_COUNT)
-    return tuple(reversed(r)) if NEOPIXEL_REVERSE_STRIP else tuple(r)
-
-
-# Strip pixel index for each feedback slot 0..7 (data-in → first pixel is index 0).
-NEOPIXEL_PHYSICAL_INDICES: Tuple[int, ...] = _feedback_physical_indices()
 
 
 class Phase(Enum):
@@ -85,17 +75,14 @@ def matches_to_neopixel_rgb(matches: List[bool]) -> List[Tuple[int, int, int]]:
 def format_neopixel_feedback_serial(matches: List[bool]) -> str:
     """
     Per-pixel serial frame for note_detector.ino (no M batch):
-      C          — clear strip buffer
-      P i r g b  — set physical pixel i (hardcoded per feedback slot below)
-      S          — latch to LEDs
+      C              — clear strip buffer
+      P k r g b      — set feedback LED k (0..7); device maps k → strip via LED_MAP
+      S              — latch to LEDs
     """
-    if len(NEOPIXEL_PHYSICAL_INDICES) != NEOPIXEL_FEEDBACK_COUNT:
-        raise ValueError("NEOPIXEL_PHYSICAL_INDICES must have 8 entries")
     lines: List[str] = ["C"]
     for led_index in range(NEOPIXEL_FEEDBACK_COUNT):
         r, g, b = neopixel_rgb_for_feedback_led(matches, led_index)
-        phys = NEOPIXEL_PHYSICAL_INDICES[led_index]
-        lines.append(f"P {phys} {r} {g} {b}")
+        lines.append(f"P {led_index} {r} {g} {b}")
     lines.append("S")
     return "\n".join(lines) + "\n"
 
@@ -103,8 +90,7 @@ def format_neopixel_feedback_serial(matches: List[bool]) -> str:
 def format_neopixel_all_green_serial() -> str:
     lines = ["C"]
     for led_index in range(NEOPIXEL_FEEDBACK_COUNT):
-        phys = NEOPIXEL_PHYSICAL_INDICES[led_index]
-        lines.append(f"P {phys} 0 255 0")
+        lines.append(f"P {led_index} 0 255 0")
     lines.append("S")
     return "\n".join(lines) + "\n"
 
