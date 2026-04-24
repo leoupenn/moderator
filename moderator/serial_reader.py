@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import queue
+import time
 import serial
 from PySide6.QtCore import QObject, QThread, Signal
+from typing import List, Tuple, Union
 
 from .serial_parser import parse_line
+
+WriteJob = Union[str, Tuple[str, List[str], float]]
 
 
 class SerialReaderWorker(QObject):
@@ -22,11 +26,15 @@ class SerialReaderWorker(QObject):
         self._baud = baud
         self._ser: serial.Serial | None = None
         self._running = False
-        self._write_queue: queue.SimpleQueue[str] = queue.SimpleQueue()
+        self._write_queue: queue.SimpleQueue[WriteJob] = queue.SimpleQueue()
 
     def enqueue_line(self, s: str) -> None:
         """Call from any thread. Consumed inside run() — avoids Queued slots (no event loop in run)."""
         self._write_queue.put(s)
+
+    def enqueue_paced_lines(self, lines: List[str], delay_s: float) -> None:
+        """Queue several one-line writes, sleeping ``delay_s`` between each in the reader thread."""
+        self._write_queue.put(("paced_lines", lines, float(delay_s)))
 
     def stop(self) -> None:
         self._running = False
@@ -42,9 +50,24 @@ class SerialReaderWorker(QObject):
             return
         while True:
             try:
-                s = self._write_queue.get_nowait()
+                job = self._write_queue.get_nowait()
             except queue.Empty:
                 break
+            if isinstance(job, tuple) and job[0] == "paced_lines":
+                _, lines, delay_s = job
+                for i, one in enumerate(lines):
+                    data = one.encode("utf-8")
+                    if not data.endswith(b"\n"):
+                        data += b"\n"
+                    try:
+                        self._ser.write(data)
+                        self._ser.flush()
+                    except Exception:
+                        pass
+                    if i + 1 < len(lines) and delay_s > 0:
+                        time.sleep(delay_s)
+                continue
+            s = job
             data = s.encode("utf-8")
             if not data.endswith(b"\n"):
                 data += b"\n"

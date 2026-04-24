@@ -26,6 +26,9 @@ class FlowPage(QWidget):
         self.flow = flow
         self.setObjectName("PageBackground")
         self.setFixedSize(DESIGN_W, DESIGN_H)
+        # Pages rely on keyboard shortcuts (submit/play/skip). Ensure the page
+        # can accept focus so keyPressEvent handlers run reliably.
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAutoFillBackground(True)
         # Background is painted via the global QSS rule #PageBackground.
         self._help = HelpButton(self)

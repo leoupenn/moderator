@@ -55,6 +55,7 @@ class GameSession(QObject):
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._state: List[int] = [0] * SLOTS
+        self._last_valid_frame: Optional[List[int]] = None
         self._frame_candidate: Optional[List[int]] = None
         self._stable_frame_count = 0
         self._sensing_stable = False
@@ -110,6 +111,7 @@ class GameSession(QObject):
     def connect_serial(self, port: str, baud: int) -> None:
         if self._worker is not None:
             return
+        self._last_valid_frame = None
         self._frame_candidate = None
         self._stable_frame_count = 0
         self._set_sensing_stable(False)
@@ -130,6 +132,7 @@ class GameSession(QObject):
             self._thread.wait(5000)
         self._thread = None
         self._worker = None
+        self._last_valid_frame = None
         self._frame_candidate = None
         self._stable_frame_count = 0
         self._set_sensing_stable(False)
@@ -144,6 +147,7 @@ class GameSession(QObject):
         self._last_matches = None
         self._p1_pattern = [0] * SLOTS
         self._state = [0] * SLOTS
+        self._last_valid_frame = None
         self._frame_candidate = None
         self._stable_frame_count = 0
         self._set_sensing_stable(False)
@@ -172,9 +176,17 @@ class GameSession(QObject):
         self._failed_attempts = 0
         self._last_matches = None
         self._state = [0] * SLOTS
+        self._last_valid_frame = None
+        # Require fresh pad stability after clearing software state; otherwise
+        # a stale ``_sensing_stable`` flag can block ``p2_submit`` while pads
+        # already match the target (Time Challenge).
+        self._frame_candidate = None
+        self._stable_frame_count = 0
+        self._set_sensing_stable(False)
         self.phase_changed.emit(self._phase)
         self.attempts_changed.emit(self._failed_attempts)
         self.p1_pattern_submitted.emit(list(self._p1_pattern))
+        self.live_pattern_changed.emit(list(self._state))
 
     def play_reference(self, *, count_in_quarters: int = 0) -> None:
         """Play the locked reference (P1) pattern. Optional quarter-note count-in."""
@@ -187,12 +199,15 @@ class GameSession(QObject):
         self._start_playback(self._state, count_in_quarters=count_in_quarters)
         return True
 
-    def p2_submit(self) -> Optional[tuple[List[bool], int]]:
-        """Grade P2 vs stored P1 reference. None if pad read not stable."""
-        if self._worker is not None and not self._sensing_stable:
+    def p2_submit(self, *, require_stable: bool = True) -> Optional[tuple[List[bool], int]]:
+        """Grade P2 vs stored P1 reference.
+
+        Returns None if pad read is not stable and ``require_stable`` is true.
+        """
+        if require_stable and self._worker is not None and not self._sensing_stable:
             return None
         self.stop_playback()
-        attempt = binary_pattern_for_playback(self._state)
+        attempt = binary_pattern_for_playback(self._last_valid_frame or self._state)
         matches, n_ok = compare_patterns(self._p1_pattern, attempt)
         self._last_matches = matches
         if n_ok == SLOTS:
@@ -202,7 +217,7 @@ class GameSession(QObject):
             self.round_won.emit()
             return matches, n_ok
         self._failed_attempts += 1
-        self.status_changed.emit(receiver_send_led(self._worker, matches))
+        self.status_changed.emit(receiver_send_led(self._worker, matches=matches))
         self._phase = Phase.FEEDBACK
         self.phase_changed.emit(self._phase)
         self.feedback_ready.emit(matches, n_ok)
@@ -232,6 +247,7 @@ class GameSession(QObject):
             self._frame_candidate = None
             return
         norm = normalize_pattern(arr)
+        self._last_valid_frame = list(norm)
         if self._frame_candidate is None or norm != self._frame_candidate:
             self._frame_candidate = list(norm)
             self._stable_frame_count = 1

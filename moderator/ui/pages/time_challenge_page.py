@@ -37,6 +37,8 @@ from PySide6.QtGui import (
     QCursor,
     QFont,
     QKeyEvent,
+    QKeySequence,
+    QShortcut,
     QMouseEvent,
     QPainter,
     QPaintEvent,
@@ -70,9 +72,31 @@ from ..widgets import (
 )
 
 
+# Multiplayer round 1 only: one bar at eighth-note resolution (16 steps).
+# Even=start, odd=end (``game_logic.slot_role``): quarter (0–3), quarter rest
+# (4–7), eighth + rest, eighth + rest (8–15).
+_MULTI_ROUND1_PRESET: List[int] = [
+    1,
+    0,
+    0,
+    1,  # quarter: start 0, end 3
+    0,
+    0,
+    0,
+    0,  # quarter rest
+    1,
+    1,
+    0,
+    0,  # eighth + eighth rest (sound 8–9)
+    1,
+    1,
+    0,
+    0,  # eighth + eighth rest (sound 12–13)
+]
+
 _LEVEL_PATTERNS: dict[LevelTier, List[List[int]]] = {
     LevelTier.EASY: [
-        # Round 1: one quarter note at the downbeat, then rests for the bar.
+        # Round 1 (solo default): one quarter note at the downbeat, then rests for the bar.
         # Slots are even=start / odd=end (see ``game_logic.slot_role``); one
         # sustained note from step 0 through 3 lights the first two 8-cell
         # beats (each cell is a slot pair) and keeps the rest blank.
@@ -291,6 +315,17 @@ class TimeChallengePage(FlowPage):
         super().__init__(flow, parent)
         self._session = session
 
+        # Keyboard shortcuts must work even when a child widget has focus.
+        # Some platforms/widgets won't reliably forward keyPressEvent up to the
+        # page, so we bind explicit shortcuts with WidgetWithChildren context.
+        self._sc_submit_p1 = QShortcut(QKeySequence(Qt.Key.Key_D), self)
+        self._sc_submit_p1.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._sc_submit_p1.activated.connect(lambda: self._submit_for(1))
+
+        self._sc_submit_p2 = QShortcut(QKeySequence(Qt.Key.Key_K), self)
+        self._sc_submit_p2.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._sc_submit_p2.activated.connect(lambda: self._submit_for(2))
+
         kicker = QLabel("COMPETITIVE MODE", self)
         kicker.setObjectName("HeroTitleSm")
         kf = QFont(THEME.font_display)
@@ -395,11 +430,12 @@ class TimeChallengePage(FlowPage):
             self._p2_card.setVisible(True)
             self._p2_duck.setVisible(True)
         self._session.set_bpm(self.flow.bpm)
+        # Ensure keyboard shortcuts (D/K/Space/N) go to this page, not a child.
         self.setFocus(Qt.FocusReason.OtherFocusReason)
 
         role = self.flow.network_role
 
-        if role == NetworkRole.CLIENT:
+        if role == NetworkRole.CLIENT and self.flow.mode == GameMode.MULTI:
             # Clients wait for the host to push ``start_round`` before their
             # timer kicks in. Initialise the visuals but don't pick a pattern
             # — that's the host's job.
@@ -479,6 +515,8 @@ class TimeChallengePage(FlowPage):
         )
 
     def _pick_pattern(self) -> List[int]:
+        if self.flow.mode == GameMode.MULTI and self.flow.current_round == 1:
+            return list(_MULTI_ROUND1_PRESET)
         choices = _LEVEL_PATTERNS.get(self.flow.level, _LEVEL_PATTERNS[LevelTier.NORMAL])
         if self.flow.mode == GameMode.SINGLE:
             return list(choices[0])
@@ -502,7 +540,9 @@ class TimeChallengePage(FlowPage):
         key = event.key()
         role = self.flow.network_role
         if key == Qt.Key.Key_D:
-            if role in (NetworkRole.SOLO, NetworkRole.HOST):
+            # Single-player should always submit locally even if this instance
+            # previously joined a network match (network_role may still be CLIENT).
+            if self.flow.mode == GameMode.SINGLE or role in (NetworkRole.SOLO, NetworkRole.HOST):
                 self._submit_for(1)
             # client: ignore D, only P2 submits here
         elif key == Qt.Key.Key_K:
@@ -535,7 +575,7 @@ class TimeChallengePage(FlowPage):
             return
         role = self.flow.network_role
 
-        if role == NetworkRole.CLIENT:
+        if role == NetworkRole.CLIENT and self.flow.mode == GameMode.MULTI:
             # Client only submits P2 via the network; host is the sole judge.
             attempt = binary_pattern_for_playback(self._session.live_state)
             mw = self._main_window()
@@ -546,6 +586,21 @@ class TimeChallengePage(FlowPage):
                     pattern=list(attempt),
                     client_elapsed_ms=int(self._elapsed_ms_p2),
                 )
+            # Still grade locally for hardware feedback: this client has the
+            # round target (from MSG_START_ROUND → set_manual_pattern), so
+            # ``GameSession.p2_submit`` can drive NeoPixel red/green feedback
+            # on *this* controller immediately without affecting host scoring.
+            res = self._session.p2_submit(require_stable=False)
+            if res is None:
+                return
+            _matches, n_ok = res
+            # Even though the host is authoritative for scoring, keep the client
+            # UI responsive: bump attempts + show "got it" immediately.
+            if n_ok == SLOTS:
+                self._complete_player(2)
+                return
+            self._bump_attempts(2)
+            QTimer.singleShot(900, self._session.feedback_continue)
             return
 
         # Solo or host-local submit → route through GameSession so that LED
@@ -553,7 +608,7 @@ class TimeChallengePage(FlowPage):
         # did pre-networking. The 8-cell visual feedback grid is gone from
         # this layout, but the hardware still gets its red/green per-slot
         # frame via ``GameSession.p2_submit``.
-        res = self._session.p2_submit()
+        res = self._session.p2_submit(require_stable=False)
         if res is None:
             return
         _matches, n_ok = res

@@ -1,8 +1,7 @@
-"""Thread-safe NeoPixel commands: ``send_led(worker, pos, r, g, b)`` per pixel, framed by ``C`` / ``S``."""
+"""Thread-safe NeoPixel: ``send_led(worker, pos, r, g, b)`` per line; ``send_led_strip`` for full frames."""
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, List, Literal, Optional, Tuple
 
 from .game_logic import (
@@ -13,14 +12,31 @@ from .game_logic import (
 if TYPE_CHECKING:
     from .serial_reader import SerialReaderWorker
 
+# Delay between each ``C`` / ``P`` / ``S`` line when sending a full feedback
+# frame (handled in the serial reader thread — does not block the UI).
+NEOPIXEL_INTER_COMMAND_DELAY_S = 0.1
+
+
+def _clamp_channel(v: int) -> int:
+    return max(0, min(255, int(v)))
+
+
+def _p_line(pos: int, r: int, g: int, b: int) -> str:
+    """Single ``P <pos> r g b`` command (no newline)."""
+    p = int(pos)
+    r, g, b = _clamp_channel(r), _clamp_channel(g), _clamp_channel(b)
+    return f"P {p} {r} {g} {b}"
+
 
 def _enqueue_led_line(worker: Optional[SerialReaderWorker], line: str) -> str:
-    """Queue exactly one host-to-device line (``C``, ``P …``, or ``S``)."""
+    """Queue exactly one host-to-device line (``C``, ``P …``, ``S``, or a full blob)."""
     if worker is None:
         return "Not connected — NeoPixel batch not sent (connect XIAO port)."
     one = line.strip()
     worker.enqueue_line(one + "\n")
-    print(f"[led] {one}", flush=True)
+    for part in one.split("\n"):
+        if part:
+            print(f"[led] {part}", flush=True)
     short = one if len(one) <= 72 else one[:72] + "…"
     return f"Sent: {short!r}"
 
@@ -35,18 +51,15 @@ def send_led(
     """
     Queue one ``P <pos> r g b`` line (feedback index ``pos`` = 0..7).
 
-    Caller should bracket a full update with ``C`` then eight ``send_led`` calls
-    then ``S`` — use ``send_led_strip`` for that.
+    For a full strip update use ``send_led_strip`` (``C`` + eight ``P`` + ``S``,
+    each on its own serial line — see ``NEOPIXEL_INTER_COMMAND_DELAY_S``).
     """
     if worker is None:
         return "Not connected — NeoPixel batch not sent (connect XIAO port)."
     p = int(pos)
     if p < 0 or p >= NEOPIXEL_FEEDBACK_COUNT:
         return f"Invalid LED index {pos!r} (need 0..{NEOPIXEL_FEEDBACK_COUNT - 1})."
-    r = max(0, min(255, int(r)))
-    g = max(0, min(255, int(g)))
-    b = max(0, min(255, int(b)))
-    return _enqueue_led_line(worker, f"P {p} {r} {g} {b}")
+    return _enqueue_led_line(worker, _p_line(pos, r, g, b))
 
 
 def send_led_strip(
@@ -56,15 +69,16 @@ def send_led_strip(
     preset: Optional[Literal["clear", "all_green"]] = None,
 ) -> str:
     """
-    Queue a full strip frame: ``C``, eight per-pixel ``P`` lines via ``send_led``,
-    then ``S``. Each line is its own queue item so the serial thread writes them
-    separately (avoids multi-line chunks being split awkwardly on the wire).
+    Queue a ``C`` + eight ``P`` + ``S`` feedback frame.
+
+    Each command is written as its **own** serial line, with a short pause
+    (``NEOPIXEL_INTER_COMMAND_DELAY_S``) between lines inside the reader thread.
+
+    ``send_led`` remains available for one-off ``P`` lines (e.g. tooling).
 
     - ``preset="clear"``: all pixels black.
     - ``preset="all_green"``: all pixels green (perfect round).
     - ``matches``: sixteen slot flags → eight red/green pairs.
-
-    After ``matches`` or ``preset="all_green"``, sleeps 0.1s when connected.
     """
     if worker is None:
         return "Not connected — NeoPixel batch not sent (connect XIAO port)."
@@ -77,12 +91,8 @@ def send_led_strip(
     else:
         return "NeoPixel feedback skipped — pass ``matches`` or ``preset=...``."
 
-    _enqueue_led_line(worker, "C")
-    for pos in range(NEOPIXEL_FEEDBACK_COUNT):
-        r, g, b = rgbs[pos]
-        send_led(worker, pos, r, g, b)
-    _enqueue_led_line(worker, "S")
-
-    if preset != "clear":
-        time.sleep(0.1)
-    return "Sent: NeoPixel frame (C + 8×P + S)"
+    lines = ["C"] + [_p_line(i, *rgbs[i]) for i in range(NEOPIXEL_FEEDBACK_COUNT)] + ["S"]
+    worker.enqueue_paced_lines(lines, NEOPIXEL_INTER_COMMAND_DELAY_S)
+    for part in lines:
+        print(f"[led] {part}", flush=True)
+    return f"Sent: {' | '.join(lines)!r}"

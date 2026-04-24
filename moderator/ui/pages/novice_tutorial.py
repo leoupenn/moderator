@@ -28,9 +28,10 @@ Frames that need music (metronome, try-tempo, hardware 3/4) embed a
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import List, Optional
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QKeyEvent, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
@@ -524,14 +525,21 @@ def _piano_sheet_image_label(parent: QWidget) -> QLabel:
     if path.exists():
         pix = QPixmap(str(path))
         if not pix.isNull():
-            lbl.setPixmap(
-                pix.scaled(
-                    938,
-                    446,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
+            # Match Figma's render of node 100:1110:
+            # - img width: 100%
+            # - img height: 130.09%
+            # - img top: -30.07% (cropped/shifted up inside the fixed frame)
+            frame_w, frame_h = 938, 446
+            scaled_h = max(1, round(frame_h * 1.3009))
+            y_off = round(frame_h * 0.3007)
+            scaled = pix.scaled(
+                frame_w,
+                scaled_h,
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
             )
+            crop = scaled.copy(0, y_off, frame_w, frame_h)
+            lbl.setPixmap(crop)
     return lbl
 
 
@@ -727,6 +735,103 @@ class NoviceHardware4Page(_HardwareCountRowPage):
 # Note type pages (100:1556 / 100:1654 / 100:1713 / 100:1777)
 # ---------------------------------------------------------------------------
 
+# Figma places the hardware tray at (105,450); Qt uses (62,451). Only grid
+# overlays need to be shifted to match the painted blocks.
+_FIGMA_GRID_ORIGIN_X = 105
+_FIGMA_GRID_ORIGIN_Y = 450
+_PAGE_GRID_X = 62
+_PAGE_GRID_Y = 451
+
+
+def _grid_symbol_page_rect(figma_x: int, figma_y: int, w: int, h: int) -> tuple[int, int, int, int]:
+    return (
+        _PAGE_GRID_X + (figma_x - _FIGMA_GRID_ORIGIN_X),
+        _PAGE_GRID_Y + (figma_y - _FIGMA_GRID_ORIGIN_Y),
+        w,
+        h,
+    )
+
+
+@dataclass(frozen=True)
+class _NoteExplainerFigmaLayout:
+    """Static layout matching the Novice Introduction_* note frames in Figma."""
+
+    body_well: tuple[int, int, int, int]
+    body_symbol_size: tuple[int, int]
+    body_symbol_asset: str
+    direction_photo: str
+    direction_photo_rect: tuple[int, int, int, int]
+    caption_center_x: int
+    caption_top: int
+    grid_symbol_rect: tuple[int, int, int, int]
+    grid_symbol_asset: str
+    arrow_rect: tuple[int, int, int, int] | None = None
+
+
+_EIGHTH_NOTE_LAYOUT = _NoteExplainerFigmaLayout(
+    body_well=(199, 199, 802, 157),
+    body_symbol_size=(120, 120),
+    body_symbol_asset="novice_note_symbol_eighth.png",
+    direction_photo="novice_note_direction_eighth.png",
+    direction_photo_rect=(1024, 130, 521, 298),
+    caption_center_x=1297,
+    caption_top=130,
+    grid_symbol_rect=_grid_symbol_page_rect(105, 511, 242, 242),
+    grid_symbol_asset="novice_note_symbol_eighth.png",
+    arrow_rect=(1120, 203, 34, 65),
+)
+
+_QUARTER_NOTE_LAYOUT = _NoteExplainerFigmaLayout(
+    body_well=(214, 201, 687, 157),
+    body_symbol_size=(120, 120),
+    body_symbol_asset="novice_note_symbol_quarter.png",
+    direction_photo="novice_note_direction_quarter.png",
+    direction_photo_rect=(1001, 97, 474, 290),
+    caption_center_x=1297,
+    caption_top=103,
+    grid_symbol_rect=_grid_symbol_page_rect(175, 509, 246, 246),
+    grid_symbol_asset="novice_note_symbol_quarter.png",
+    arrow_rect=None,
+)
+
+_HALF_NOTE_LAYOUT = _NoteExplainerFigmaLayout(
+    body_well=(214, 201, 696, 157),
+    body_symbol_size=(46, 120),
+    body_symbol_asset="novice_note_symbol_half.png",
+    direction_photo="novice_note_direction_half.png",
+    direction_photo_rect=(949, 100, 517, 315),
+    caption_center_x=1314,
+    caption_top=103,
+    grid_symbol_rect=_grid_symbol_page_rect(421, 493, 103, 266),
+    grid_symbol_asset="novice_note_symbol_half.png",
+    arrow_rect=(1202, 214, 34, 65),
+)
+
+
+def _place_rotated_direction_arrow(parent: QWidget, x: int, y: int, w: int, h: int) -> None:
+    """Figma exports the chevron horizontal; the frames rotate it 90° for “down”."""
+    from PySide6.QtSvg import QSvgRenderer
+
+    path = asset_path("novice_note_direction_arrow.svg")
+    if not path.exists():
+        return
+    renderer = QSvgRenderer(str(path))
+    out_w, out_h = h, w
+    pix = QPixmap(out_w, out_h)
+    pix.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    p.translate(out_w / 2, out_h / 2)
+    p.rotate(90)
+    p.translate(-w / 2, -h / 2)
+    renderer.render(p, QRectF(0, 0, float(w), float(h)))
+    p.end()
+    lbl = QLabel(parent)
+    lbl.setPixmap(pix)
+    lbl.setFixedSize(out_w, out_h)
+    lbl.move(x, y)
+    lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
 
 class _NoteTypeBase(NoviceTutorialBase):
     """Shared layout for Eighth/Quarter/Half/Whole note explainers.
@@ -740,8 +845,11 @@ class _NoteTypeBase(NoviceTutorialBase):
 
     # Number of contiguous filled grid blocks the connected controller must
     # report before the page auto-plays and advances. ``None`` disables the
-    # behaviour (used by Half/Whole note which stay manual via Continue).
+    # behaviour (used by Whole note which stays manual via Continue).
     AUTOPLAY_BLOCKS: Optional[int] = None
+    # If True, filled blocks must be exactly ``0 .. AUTOPLAY_BLOCKS-1`` (measure
+    # start). If False, any contiguous run of that length counts (eighth note).
+    AUTOPLAY_FROM_BLOCK_ZERO: bool = False
 
     def __init__(
         self,
@@ -751,14 +859,20 @@ class _NoteTypeBase(NoviceTutorialBase):
         body: str,
         active_blocks: List[int],
         try_text: Optional[str],
+        figma_note_layout: Optional[_NoteExplainerFigmaLayout] = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(flow, title=title, body=body, parent=parent)
 
+        self._autoplay_k_lo = min(active_blocks) if active_blocks else 0
+        self._autoplay_k_hi = max(active_blocks) if active_blocks else _NOTE_BLOCK_COUNT - 1
+
         grid = _HardwareGrid(self, active_blocks=active_blocks)
         grid.move(62, 451)
 
-        if try_text is not None:
+        if figma_note_layout is not None:
+            self._apply_figma_note_layout(figma_note_layout, grid, try_text)
+        elif try_text is not None:
             prompt = QFrame(self)
             prompt.setObjectName("CardDark")
             prompt.setFixedSize(888, 86)
@@ -778,6 +892,101 @@ class _NoteTypeBase(NoviceTutorialBase):
         self._autoplay_timer: Optional[QTimer] = None
         self._pattern_connected = False
 
+    def _apply_figma_note_layout(
+        self,
+        layout: _NoteExplainerFigmaLayout,
+        grid: _HardwareGrid,
+        try_text: Optional[str],
+    ) -> None:
+        """Bordered body well + notation glyph, 3D direction photo, grid overlay."""
+        bx, by, bw, bh = layout.body_well
+        well = QFrame(self)
+        well.setGeometry(bx, by, bw, bh)
+        well.setStyleSheet(
+            "QFrame { border: 1px solid #FFFFFF; background: transparent; }"
+        )
+
+        sym_w, sym_h = layout.body_symbol_size
+        pad_x, pad_y, gap = 30, 20, 10
+        text_w = max(1, bw - pad_x * 2 - gap - sym_w)
+        self._body_label.setParent(well)
+        self._body_label.setWordWrap(True)
+        self._body_label.setGeometry(pad_x, pad_y, text_w, bh - pad_y * 2)
+        self._body_label.setAlignment(
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter
+        )
+
+        sym = QLabel(well)
+        sym.setFixedSize(sym_w, sym_h)
+        sym.move(bw - pad_x - sym_w, max(0, (bh - sym_h) // 2))
+        sym.setScaledContents(True)
+        sym.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        sym_path = asset_path(layout.body_symbol_asset)
+        if sym_path.exists():
+            s_pix = QPixmap(str(sym_path))
+            if not s_pix.isNull():
+                sym.setPixmap(s_pix)
+
+        px, py, pw, ph = layout.direction_photo_rect
+        photo = QLabel(self)
+        photo.setGeometry(px, py, pw, ph)
+        photo.setScaledContents(True)
+        photo.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        ppath = asset_path(layout.direction_photo)
+        if ppath.exists():
+            d_pix = QPixmap(str(ppath))
+            if not d_pix.isNull():
+                photo.setPixmap(d_pix)
+
+        cap_w, cap_h = 220, 120
+        cap = QLabel("Note the Direction!".upper(), self)
+        cap.setStyleSheet(
+            f"color: #FFE560; font-family: '{THEME.font_display}'; "
+            f"font-size: 40px; background: transparent;"
+        )
+        cap.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        cap.setWordWrap(True)
+        cx = layout.caption_center_x
+        cap.setGeometry(cx - cap_w // 2, layout.caption_top, cap_w, cap_h)
+        cap.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+        if layout.arrow_rect is not None:
+            ax, ay, aw, ah = layout.arrow_rect
+            _place_rotated_direction_arrow(self, ax, ay, aw, ah)
+
+        if try_text:
+            row = QWidget(self)
+            row_h = 90
+            row.setFixedSize(DESIGN_W, row_h)
+            row.move(0, 364)
+            msg = QLabel(try_text.upper(), row)
+            msg.setStyleSheet(
+                f"color: {THEME.accent_blue}; font-family: '{THEME.font_display}'; "
+                f"font-size: 48px; background: transparent;"
+            )
+            msg.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            msg.adjustSize()
+            play = svg_widget("play_vector.svg", 86, 86, row)
+            inner_w = msg.width() + 20 + 86
+            x0 = (DESIGN_W - inner_w) // 2
+            msg.move(x0, max(0, (row_h - msg.height()) // 2))
+            play.move(x0 + msg.width() + 20, max(0, (row_h - 86) // 2))
+
+        gx, gy, gw, gh = layout.grid_symbol_rect
+        over = QLabel(self)
+        over.setGeometry(gx, gy, gw, gh)
+        over.setScaledContents(True)
+        over.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        gpath = asset_path(layout.grid_symbol_asset)
+        if gpath.exists():
+            gpix = QPixmap(str(gpath))
+            if not gpix.isNull():
+                over.setPixmap(gpix)
+        over.raise_()
+        if self._continue is not None:
+            self._continue.raise_()
+        self.help_button.raise_()
+
     # ----- controller hookup ------------------------------------------------
     def attach_session(self, session) -> None:
         """Subscribe to live hardware frames from the shared ``GameSession``."""
@@ -794,6 +1003,11 @@ class _NoteTypeBase(NoviceTutorialBase):
         # Arm auto-advance each time the page becomes visible so back/forward
         # navigation keeps the gesture responsive.
         self._autoplay_armed = self.AUTOPLAY_BLOCKS is not None
+        # If blocks were already inserted before this page was shown, the pattern
+        # may not change again — re-evaluate once from the current live state.
+        if self._autoplay_armed and self._session is not None:
+            # Defer so pad reads can stabilize after the page transition.
+            QTimer.singleShot(120, self._autoplay_flush_if_ready)
 
     def hideEvent(self, event) -> None:  # noqa: D401 - Qt override
         super().hideEvent(event)
@@ -801,36 +1015,48 @@ class _NoteTypeBase(NoviceTutorialBase):
         if self._autoplay_timer is not None:
             self._autoplay_timer.stop()
 
+    def _autoplay_flush_if_ready(self) -> None:
+        if not self._autoplay_armed or self.AUTOPLAY_BLOCKS is None or self._session is None:
+            return
+        self._on_live_pattern(list(self._session.live_state))
+
     # ----- pattern matching -------------------------------------------------
     @staticmethod
     def _filled_blocks(pattern: List[int]) -> List[int]:
-        """Return grid-block indices (0..7) where both slot pads read 1."""
+        """Return grid-block indices (0..7) occupied by the current pad pattern.
+
+        Note type pages should treat held notes the same way the audio engine does:
+        quarter/half blocks often present as an even-index start and an odd-index
+        end (with the interior slots left 0). Using only "both pads in the pair
+        are 1" works for a single eighth block but breaks for held notes.
+        """
+        n = min(SLOTS, len(pattern))
+        gate = [False] * SLOTS
+        for i in range(n):
+            if pattern[i]:
+                gate[i] = True
+        for s, e in note_intervals_from_pattern(list(pattern)):
+            for k in range(max(0, s), min(SLOTS - 1, e) + 1):
+                gate[k] = True
         out: List[int] = []
         for k in range(_NOTE_BLOCK_COUNT):
             a_idx, b_idx = 2 * k, 2 * k + 1
-            if b_idx < len(pattern) and pattern[a_idx] and pattern[b_idx]:
+            if b_idx < len(gate) and (gate[a_idx] or gate[b_idx]):
                 out.append(k)
         return out
 
-    @staticmethod
-    def _has_partial_block(pattern: List[int]) -> bool:
-        """True if any grid block has exactly one of its two slot pads on.
+    def _has_partial_block_in_window(self, pattern: List[int]) -> bool:
+        """Legacy helper (kept for minimal diff); held notes look 'partial' at ends.
 
-        Partial blocks mean the hardware read is mid-insertion or corrupt —
-        ignore those frames so we only trigger on clean, fully-seated blocks.
+        Quarter/half blocks can legitimately show only a start (even index) and
+        end (odd index) with zeros in-between. Treating that as a blocker would
+        prevent autoplay on those screens, so we no longer use this predicate.
         """
-        for k in range(_NOTE_BLOCK_COUNT):
-            a_idx, b_idx = 2 * k, 2 * k + 1
-            if b_idx < len(pattern):
-                a, b = pattern[a_idx], pattern[b_idx]
-                if (a and not b) or (b and not a):
-                    return True
+        _ = pattern
         return False
 
     def _on_live_pattern(self, pattern: List[int]) -> None:
         if not self._autoplay_armed or self.AUTOPLAY_BLOCKS is None:
-            return
-        if self._has_partial_block(pattern):
             return
         blocks = self._filled_blocks(pattern)
         if len(blocks) != self.AUTOPLAY_BLOCKS:
@@ -839,6 +1065,8 @@ class _NoteTypeBase(NoviceTutorialBase):
         # block (k) or quarter-note block (k, k+1) triggers but two distant
         # eighth-notes do not.
         if blocks != list(range(blocks[0], blocks[0] + len(blocks))):
+            return
+        if self.AUTOPLAY_FROM_BLOCK_ZERO and blocks[0] != 0:
             return
         self._autoplay_armed = False
         self._play_and_advance()
@@ -884,10 +1112,11 @@ class NoviceEighthNotePage(_NoteTypeBase):
         super().__init__(
             flow,
             title="What is an Eighth note?",
-            body="We have four audible counts split into 1 and — therefore 4×2 = 8. "
-            "Each 'grid' = 8th note.",
+            body="We have four audible counts that are split into 1 and\n"
+            "therefore 4×2 = 8 — each 'grid' = 8th note.",
             active_blocks=[0],
-            try_text="Try putting the 8th note block in — then play it!",
+            try_text="Try putting the 8th note block in! And play it",
+            figma_note_layout=_EIGHTH_NOTE_LAYOUT,
             parent=parent,
         )
 
@@ -895,26 +1124,34 @@ class NoviceEighthNotePage(_NoteTypeBase):
 class NoviceQuarterNotePage(_NoteTypeBase):
 
     AUTOPLAY_BLOCKS = 2
+    AUTOPLAY_FROM_BLOCK_ZERO = True
 
     def __init__(self, flow: FlowState, parent: QWidget | None = None) -> None:
         super().__init__(
             flow,
             title="What is a Quarter Note?",
-            body="A Quarter Note is one whole count — it occupies two eighth-note grids.",
+            body="This is the four audible counts! This is a quarter note and "
+            "represents one whole count!",
             active_blocks=[0, 1],
-            try_text="Try putting the Quarter Note block in — then play it!",
+            try_text="Try putting the quarter note block in! And play it",
+            figma_note_layout=_QUARTER_NOTE_LAYOUT,
             parent=parent,
         )
 
 
 class NoviceHalfNotePage(_NoteTypeBase):
+
+    AUTOPLAY_BLOCKS = 4
+    AUTOPLAY_FROM_BLOCK_ZERO = True
+
     def __init__(self, flow: FlowState, parent: QWidget | None = None) -> None:
         super().__init__(
             flow,
             title="What is a Half Note?",
-            body="A Half Note holds for two counts — four eighth-note grids.",
+            body="This is two counts, which is a half note and holds for two counts!",
             active_blocks=[0, 1, 2, 3],
-            try_text="Try putting the Half Note block in — then play it!",
+            try_text="Try putting the half note block in! And play it",
+            figma_note_layout=_HALF_NOTE_LAYOUT,
             parent=parent,
         )
 
