@@ -4,7 +4,7 @@ Refresh of the original head-to-head layout:
 
 * Header ("COMPETITIVE MODE" / "Time Challenge" / "ROUND N") unchanged.
 * Rhythm strip (1086×130 white pill at y=172) with a play icon on the right —
-  clicking the strip plays the **local** pad-built rhythm after a one-bar (four
+  clicking the strip plays the preset/reference rhythm after a one-bar (four
   quarter-note) metronome count-in, same as the orange ``Play Your Rhythm`` pill.
 * Two player cards (450×561), gray for P1 and yellow for P2, each stacking
   Player title · timer digits · attempt counter · submit hint.
@@ -53,7 +53,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...game_logic import Phase, SLOTS, binary_pattern_for_playback, compare_patterns
+from ...game_logic import Phase, SLOTS, compare_patterns
 from ...phrase_audio import DEFAULT_COUNT_IN_QUARTERS
 from ...net import (
     MSG_ATTEMPTS_UPDATE,
@@ -117,10 +117,11 @@ _LEVEL_PATTERNS: dict[LevelTier, List[List[int]]] = {
 _BIG_PENALTY_MS = 10 * 60 * 1000  # 10-minute penalty for unfinished submits
 
 # Colors specific to the Time Challenge refresh (Figma 113:2822 / 115:3177).
-# Kept local instead of bolted onto THEME because P1's card turning gray is a
-# Time Challenge choice, not a global palette change.
-_PLAYER1_CARD_BG = "#BFC0BF"
-_PLAYER2_CARD_BG = THEME.accent_yellow  # "#DFC22C"
+# Kept local instead of bolted onto THEME because the local/remote player card
+# highlighting is a Time Challenge choice, not a global palette change.
+_PLAYER_CARD_REMOTE_BG = "#BFC0BF"
+_PLAYER1_LOCAL_CARD_BG = THEME.accent_blue
+_PLAYER2_LOCAL_CARD_BG = THEME.accent_yellow  # "#DFC22C"
 _PLAY_RHYTHM_ORANGE = "#E48706"
 _PLAY_RHYTHM_ORANGE_HOVER = "#F29823"
 _PLAY_RHYTHM_ORANGE_PRESSED = "#C27405"
@@ -221,14 +222,14 @@ class _PlayerCard(QFrame):
         name: str,
         *,
         variant: str,
+        background: str,
         show_play_button: bool,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setFixedSize(450, 561)
-        bg = _PLAYER1_CARD_BG if variant == "p1" else _PLAYER2_CARD_BG
         self.setStyleSheet(
-            f"QFrame {{ background: {bg}; border-radius: 20px; border: none; }}"
+            f"QFrame {{ background: {background}; border-radius: 20px; border: none; }}"
         )
 
         col = QVBoxLayout(self)
@@ -376,15 +377,28 @@ class TimeChallengePage(FlowPage):
         # ----- player cards ----------------------------------------------
         role = flow.network_role
         local_is_p1 = role in (NetworkRole.SOLO, NetworkRole.HOST)
+        p1_bg = _PLAYER1_LOCAL_CARD_BG if local_is_p1 else _PLAYER_CARD_REMOTE_BG
+        p2_bg = (
+            _PLAYER2_LOCAL_CARD_BG
+            if role == NetworkRole.CLIENT
+            else _PLAYER_CARD_REMOTE_BG
+        )
         self._p1_card = _PlayerCard(
-            "Player 1", variant="p1", show_play_button=local_is_p1, parent=self
+            "Player 1",
+            variant="p1",
+            background=p1_bg,
+            show_play_button=local_is_p1,
+            parent=self,
         )
         self.place(self._p1_card, 213, 361)
         if self._p1_card.play_btn is not None:
             self._p1_card.play_rhythm.connect(self._on_play_clicked)
 
         self._p2_card = _PlayerCard(
-            "Player 2", variant="p2", show_play_button=(role == NetworkRole.CLIENT),
+            "Player 2",
+            variant="p2",
+            background=p2_bg,
+            show_play_button=(role == NetworkRole.CLIENT),
             parent=self,
         )
         self.place(self._p2_card, 849, 361)
@@ -552,9 +566,7 @@ class TimeChallengePage(FlowPage):
                 self._submit_for(2)
             elif role == NetworkRole.SOLO:
                 self._submit_for(2)
-            # host+keyboard: keep local K submit working for solo testing
-            elif role == NetworkRole.HOST:
-                self._submit_for(2)
+            # host in multiplayer: ignore K; P2 must submit from the joiner's controller.
         elif key == Qt.Key.Key_Space:
             self._on_play_clicked()
         elif key == Qt.Key.Key_N:
@@ -575,9 +587,17 @@ class TimeChallengePage(FlowPage):
             return
         role = self.flow.network_role
 
+        if self.flow.mode == GameMode.MULTI:
+            if role == NetworkRole.HOST and player != 1:
+                return
+            if role == NetworkRole.CLIENT and player != 2:
+                return
+
         if role == NetworkRole.CLIENT and self.flow.mode == GameMode.MULTI:
             # Client only submits P2 via the network; host is the sole judge.
-            attempt = binary_pattern_for_playback(self._session.live_state)
+            attempt = self._session.current_submit_pattern(require_stable=False)
+            if attempt is None:
+                return
             mw = self._main_window()
             if mw is not None:
                 mw.net.send(
@@ -714,10 +734,9 @@ class TimeChallengePage(FlowPage):
         self._on_play_clicked()
 
     def _on_play_clicked(self) -> None:
-        # Each machine previews the **connected controller** pattern (live
-        # pads), not the round target — host hears P1's build, client hears
-        # P2's. No network broadcast.
-        self._session.play_current(count_in_quarters=DEFAULT_COUNT_IN_QUARTERS)
+        # Play the round's preset/reference rhythm on this machine. The host
+        # seeds it locally; clients receive the same target via MSG_START_ROUND.
+        self._session.play_reference(count_in_quarters=DEFAULT_COUNT_IN_QUARTERS)
 
     def host_apply_play_reference(self) -> None:
         """Legacy network hook — kept so older clients still trigger local audio.
@@ -725,9 +744,9 @@ class TimeChallengePage(FlowPage):
         The new design drops the shared "Play target" button in favour of
         per-player controls, so this is only called if a peer running an
         older build sends ``MSG_TIME_CHALLENGE_CONTROL {action: play_reference}``.
-        Match current behaviour: play this machine's live pad pattern.
+        Match current behaviour: play this machine's preset target pattern.
         """
-        self._session.play_current(count_in_quarters=DEFAULT_COUNT_IN_QUARTERS)
+        self._session.play_reference(count_in_quarters=DEFAULT_COUNT_IN_QUARTERS)
 
     def host_apply_force_finish(self) -> None:
         """Host-only: force-end invoked from the network (``N`` on P2's machine)."""

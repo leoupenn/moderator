@@ -382,11 +382,21 @@ class MainWindow(QMainWindow):
             self._nav.go("time_challenge")
 
     def _on_back_home(self) -> None:
+        self._clear_feedback_leds()
         self._flow.reset_all()
         self._nav.go("welcome")
 
+    def _clear_feedback_leds(self) -> None:
+        """Clear controller feedback LEDs when leaving gameplay for home."""
+        try:
+            self._session.clear_feedback_leds()
+        except Exception:
+            pass
+
     # ----- networking: nav / state sync -----------------------------------
     def _on_route_changed(self, name: str) -> None:
+        if name == "welcome":
+            self._clear_feedback_leds()
         # Host broadcasts every navigation so the client mirrors exactly.
         # The client itself never sends nav messages — it only follows.
         if self._applying_remote_nav:
@@ -425,6 +435,7 @@ class MainWindow(QMainWindow):
                 self._apply_remote_nav(route)
             return
         if kind == MSG_ABORT_TO_HOME:
+            self._clear_feedback_leds()
             self._flow.reset_all()
             self._apply_remote_nav("welcome")
             return

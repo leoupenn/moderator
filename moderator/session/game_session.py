@@ -101,6 +101,19 @@ class GameSession(QObject):
     def is_connected(self) -> bool:
         return self._worker is not None
 
+    def current_submit_pattern(self, *, require_stable: bool = True) -> Optional[List[int]]:
+        """Return the latest controller pattern suitable for submit/grading.
+
+        ``live_state`` is only promoted after the debounce sees the same frame
+        twice. In networked Time Challenge, a player can press submit just after
+        a valid serial frame arrives but before that promotion; use
+        ``_last_valid_frame`` as the freshest controller-owned pattern while
+        still allowing callers to require fully stable sensing when desired.
+        """
+        if require_stable and self._worker is not None and not self._sensing_stable:
+            return None
+        return binary_pattern_for_playback(self._last_valid_frame or self._state)
+
     def set_bpm(self, bpm: float) -> None:
         self._bpm = max(20.0, float(bpm))
 
@@ -204,10 +217,10 @@ class GameSession(QObject):
 
         Returns None if pad read is not stable and ``require_stable`` is true.
         """
-        if require_stable and self._worker is not None and not self._sensing_stable:
+        attempt = self.current_submit_pattern(require_stable=require_stable)
+        if attempt is None:
             return None
         self.stop_playback()
-        attempt = binary_pattern_for_playback(self._last_valid_frame or self._state)
         matches, n_ok = compare_patterns(self._p1_pattern, attempt)
         self._last_matches = matches
         if n_ok == SLOTS:
@@ -236,6 +249,10 @@ class GameSession(QObject):
 
     def new_round(self) -> None:
         self.start_new_match()
+
+    def clear_feedback_leds(self) -> None:
+        """Clear the connected controller's NeoPixel feedback strip."""
+        self.status_changed.emit(receiver_send_led(self._worker, preset="clear"))
 
     # ----- internal serial/pad handling ------------------------------------
     def _on_frame(self, arr: list) -> None:
