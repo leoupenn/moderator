@@ -1,25 +1,44 @@
-"""Character carousel — 5 duck variants with left/right arrows and name pill."""
+"""Character carousel — duck variants with left/right arrows and name pill."""
 from __future__ import annotations
 
 from typing import List
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QEasingCurve, QParallelAnimationGroup, QSize, Qt, Signal
 from PySide6.QtGui import QIcon, QPixmap, QTransform
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFrame,
+    QGraphicsOpacityEffect,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ...session.flow_state import Character
 from .asset_loader import asset_path
 from .duck_mascot import DuckMascot
 
 
-_ROW_SPECS: List[tuple[Character, int, int]] = [
-    (Character.BABY_DUCK, 55, 61),
-    (Character.YOUNG_DUCK, 95, 105),
-    (Character.NORMAL_DUCK, 239, 263),
-    (Character.COOL_DUCK, 95, 105),
-    (Character.SPY_DUCK, 55, 61),
+_ROW_ORDER: List[Character] = [
+    Character.KING_DUCK,
+    Character.TOP_HAT_DUCK,
+    Character.BASIC_DUCK,
+    Character.VARIANT_4_DUCK,
 ]
+
+_DUCK_SIZES = {
+    0: QSize(239, 263),
+    1: QSize(95, 105),
+    2: QSize(55, 61),
+}
+
+_DUCK_OPACITIES = {
+    0: 1.0,
+    1: 0.75,
+    2: 0.5,
+}
 
 
 class CharacterStrip(QFrame):
@@ -49,8 +68,15 @@ class CharacterStrip(QFrame):
         ducks_row.setContentsMargins(0, 0, 0, 0)
         ducks_row.setSpacing(18)
         ducks_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        for char, w, h in _ROW_SPECS:
-            d = DuckMascot(char.asset, w, h)
+        self._duck_widgets: dict[Character, DuckMascot] = {}
+        self._duck_effects: dict[Character, QGraphicsOpacityEffect] = {}
+        self._selection_animation: QParallelAnimationGroup | None = None
+        for char in _ROW_ORDER:
+            d = DuckMascot(char.asset, 95, 105)
+            effect = QGraphicsOpacityEffect(d)
+            d.setGraphicsEffect(effect)
+            self._duck_widgets[char] = d
+            self._duck_effects[char] = effect
             ducks_row.addWidget(d, 0, Qt.AlignmentFlag.AlignBottom)
         ducks_host = QWidget()
         ducks_host.setLayout(ducks_row)
@@ -79,9 +105,9 @@ class CharacterStrip(QFrame):
         controls_host.setLayout(controls)
         outer.addWidget(controls_host, 0, Qt.AlignmentFlag.AlignCenter)
 
-        self._order = [c for c, _, _ in _ROW_SPECS]
-        self._idx = 2  # default to Normal Duck
-        self._update_name()
+        self._order = list(_ROW_ORDER)
+        self._idx = 2  # default to the Figma Basic variant
+        self._update_selection(animate=False)
 
     @staticmethod
     def _make_arrow(mirror: bool) -> QPushButton:
@@ -108,23 +134,84 @@ class CharacterStrip(QFrame):
 
     def _go_prev(self) -> None:
         self._idx = (self._idx - 1) % len(self._order)
-        self._update_name()
+        self._update_selection(animate=True)
         self.selection_changed.emit(self.current())
 
     def _go_next(self) -> None:
         self._idx = (self._idx + 1) % len(self._order)
-        self._update_name()
+        self._update_selection(animate=True)
         self.selection_changed.emit(self.current())
 
     def current(self) -> Character:
         return self._order[self._idx]
 
-    def set_current(self, character: Character) -> None:
+    def set_current(self, character: Character, animate: bool = False) -> None:
         try:
             self._idx = self._order.index(character)
         except ValueError:
             return
-        self._update_name()
+        self._update_selection(animate=animate)
 
-    def _update_name(self) -> None:
+    def _update_selection(self, animate: bool) -> None:
         self._name.setText(self._order[self._idx].label)
+
+        if self._selection_animation is not None:
+            self._selection_animation.stop()
+            self._selection_animation = None
+
+        if not animate:
+            for char, duck in self._duck_widgets.items():
+                size = self._size_for(char)
+                duck.setFixedSize(size)
+                self._duck_effects[char].setOpacity(self._opacity_for(char))
+            return
+
+        group = QParallelAnimationGroup(self)
+        for char, duck in self._duck_widgets.items():
+            size = self._size_for(char)
+            self._add_size_animation(group, duck, b"minimumSize", size)
+            self._add_size_animation(group, duck, b"maximumSize", size)
+
+            opacity_anim = self._make_animation(
+                self._duck_effects[char],
+                b"opacity",
+                self._duck_effects[char].opacity(),
+                self._opacity_for(char),
+            )
+            group.addAnimation(opacity_anim)
+
+        self._selection_animation = group
+        group.finished.connect(lambda: setattr(self, "_selection_animation", None))
+        group.start()
+
+    def _distance_from_current(self, character: Character) -> int:
+        idx = self._order.index(character)
+        raw = abs(idx - self._idx)
+        return min(raw, len(self._order) - raw)
+
+    def _size_for(self, character: Character) -> QSize:
+        return _DUCK_SIZES.get(self._distance_from_current(character), _DUCK_SIZES[2])
+
+    def _opacity_for(self, character: Character) -> float:
+        return _DUCK_OPACITIES.get(self._distance_from_current(character), 0.5)
+
+    def _add_size_animation(
+        self,
+        group: QParallelAnimationGroup,
+        duck: DuckMascot,
+        prop: bytes,
+        end_size: QSize,
+    ) -> None:
+        anim = self._make_animation(duck, prop, duck.property(prop.decode()), end_size)
+        group.addAnimation(anim)
+
+    @staticmethod
+    def _make_animation(obj, prop: bytes, start, end):
+        from PySide6.QtCore import QPropertyAnimation
+
+        anim = QPropertyAnimation(obj, prop)
+        anim.setDuration(180)
+        anim.setStartValue(start)
+        anim.setEndValue(end)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        return anim

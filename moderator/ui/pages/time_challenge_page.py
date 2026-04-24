@@ -5,12 +5,12 @@ Refresh of the original head-to-head layout:
 * Header ("COMPETITIVE MODE" / "Time Challenge" / "ROUND N") unchanged.
 * Rhythm strip (1086×130 white pill at y=172) with a play icon on the right —
   clicking the strip plays the preset/reference rhythm after a one-bar (four
-  quarter-note) metronome count-in, same as the orange ``Play Your Rhythm`` pill.
+  quarter-note) metronome count-in.
 * Two player cards (450×561), gray for P1 and yellow for P2, each stacking
   Player title · timer digits · attempt counter · submit hint.
 * A single "Play Your Rhythm" orange pill sits inside the *local* player's
   card (P1 for host / solo, P2 for client) so each machine has its own
-  play-reference control. Playback stays local — no network broadcast.
+  local-controller preview. Playback stays local — no network broadcast.
 * The 8-cell RhythmTrackGrid and the standalone "Play target" / "Skip"
   buttons from the old layout are gone. Skip / force-finish is still
   reachable via the ``N`` keyboard shortcut for testing.
@@ -392,7 +392,7 @@ class TimeChallengePage(FlowPage):
         )
         self.place(self._p1_card, 213, 361)
         if self._p1_card.play_btn is not None:
-            self._p1_card.play_rhythm.connect(self._on_play_clicked)
+            self._p1_card.play_rhythm.connect(self._on_play_your_rhythm_clicked)
 
         self._p2_card = _PlayerCard(
             "Player 2",
@@ -403,7 +403,7 @@ class TimeChallengePage(FlowPage):
         )
         self.place(self._p2_card, 849, 361)
         if self._p2_card.play_btn is not None:
-            self._p2_card.play_rhythm.connect(self._on_play_clicked)
+            self._p2_card.play_rhythm.connect(self._on_play_your_rhythm_clicked)
 
         p1_duck = DuckMascot(flow.character_p1.asset, 124, 137, self)
         p1_duck.move(154, 313)
@@ -731,12 +731,18 @@ class TimeChallengePage(FlowPage):
 
     # ----- reference audio (local playback per machine) --------------------
     def _on_strip_clicked(self, _e: QMouseEvent) -> None:
-        self._on_play_clicked()
+        self._on_play_the_rhythm_clicked()
 
     def _on_play_clicked(self) -> None:
-        # Play the round's preset/reference rhythm on this machine. The host
-        # seeds it locally; clients receive the same target via MSG_START_ROUND.
+        self._on_play_the_rhythm_clicked()
+
+    def _on_play_the_rhythm_clicked(self) -> None:
+        """Play the round's preset/reference rhythm."""
         self._session.play_reference(count_in_quarters=DEFAULT_COUNT_IN_QUARTERS)
+
+    def _on_play_your_rhythm_clicked(self) -> None:
+        """Preview this machine's connected-controller rhythm."""
+        self._session.play_current(count_in_quarters=DEFAULT_COUNT_IN_QUARTERS)
 
     def host_apply_play_reference(self) -> None:
         """Legacy network hook — kept so older clients still trigger local audio.

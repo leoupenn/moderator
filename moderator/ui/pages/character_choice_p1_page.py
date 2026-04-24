@@ -104,7 +104,7 @@ class CharacterChoiceP1Page(FlowPage):
     # ----- remote updates ------------------------------------------------
     def apply_remote_selection(self) -> None:
         """MainWindow calls this when an inbound character_select lands."""
-        self._strip.set_current(self.flow.character_p1)
+        self._strip.set_current(self.flow.character_p1, animate=True)
 
     # ----- helpers -------------------------------------------------------
     def _main_window(self):

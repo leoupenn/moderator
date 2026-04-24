@@ -25,8 +25,8 @@ import time
 from typing import List, Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QFont, QKeyEvent, QMouseEvent
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
+from PySide6.QtGui import QCursor, QFont, QKeyEvent, QMouseEvent
+from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QWidget
 
 from ...game_logic import (
     Phase,
@@ -49,12 +49,49 @@ from ..widgets import (
 from ..widgets.asset_loader import svg_widget
 
 
+_RR_PLAYER1_CARD_BG = THEME.accent_blue
+_RR_PLAYER2_CARD_BG = THEME.accent_yellow
+_RR_PLAY_YOUR_RHYTHM_BG = "#0C8CE9"
+_RR_PLAY_YOUR_RHYTHM_HOVER = "#1F9AF2"
+_RR_PLAY_YOUR_RHYTHM_PRESSED = "#0873C1"
+
+
 def _format_ms(ms: int) -> str:
     total_s = ms // 1000
     m = total_s // 60
     s = total_s % 60
     cs = (ms % 1000) // 10
     return f"{m:02d}:{s:02d}:{cs:02d}"
+
+
+class _PlayYourRhythmButton(QPushButton):
+    """Blue Figma pill used to preview the local recreator's controller rhythm."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__("Play Your Rhythm", parent)
+        self.setFixedSize(256, 74)
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        f = QFont(THEME.font_display)
+        f.setPixelSize(32)
+        self.setFont(f)
+        self.setStyleSheet(
+            "QPushButton {"
+            f"  background: {_RR_PLAY_YOUR_RHYTHM_BG};"
+            "   color: white;"
+            "   border: none;"
+            "   border-radius: 37px;"
+            "   padding: 0 24px;"
+            "}"
+            "QPushButton:hover {"
+            f"  background: {_RR_PLAY_YOUR_RHYTHM_HOVER};"
+            "}"
+            "QPushButton:pressed {"
+            f"  background: {_RR_PLAY_YOUR_RHYTHM_PRESSED};"
+            "}"
+            "QPushButton:disabled {"
+            "   color: rgba(255,255,255,140);"
+            "}"
+        )
 
 
 class RecreateRhythmP2Page(FlowPage):
@@ -106,22 +143,20 @@ class RecreateRhythmP2Page(FlowPage):
         self._strip_lbl = QLabel("Play Player 1's Rhythm\u2026", self._strip)
         self._strip_lbl.setObjectName("StripLabel")
         sl = QFont(THEME.font_display)
-        sl.setPixelSize(36)
+        sl.setPixelSize(40)
         self._strip_lbl.setFont(sl)
         self._strip_lbl.adjustSize()
         self._strip_lbl.move(50, 28)
 
-        self._play_icon = svg_widget("play_ellipse.svg", 60, 60, self._strip)
-        self._play_icon.move(1010, 18)
+        self._play_icon = svg_widget("play_ellipse.svg", 80, 80, self._strip)
+        self._play_icon.move(986, 8)
+        self._play_vector = svg_widget("play_vector.svg", 27, 27, self._strip)
+        self._play_vector.move(1016, 35)
         self._strip.mousePressEvent = self._strip_clicked  # type: ignore[assignment]
 
         card = QFrame(self)
-        card.setObjectName("CardYellow")
-        card.setGeometry((DESIGN_W - 1067) // 2, 287, 1067, 357)
-
-        col = QVBoxLayout(card)
-        col.setContentsMargins(40, 24, 40, 24)
-        col.setSpacing(18)
+        self._card = card
+        card.setGeometry(232, 287, 1060, 357)
 
         self._player_title = QLabel("Player 2", card)
         self._player_title.setObjectName("PlayerTitle")
@@ -129,31 +164,37 @@ class RecreateRhythmP2Page(FlowPage):
         pf.setPixelSize(48)
         self._player_title.setFont(pf)
         self._player_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        col.addWidget(self._player_title)
+        self._player_title.setGeometry(178, 85, 320, 51)
 
         self._time_lbl = QLabel("00:00:00", card)
         self._time_lbl.setObjectName("TimeDigitsBig")
         tf = QFont(THEME.font_display)
-        tf.setPixelSize(112)
+        tf.setPixelSize(128)
+        tf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 6.4)
         self._time_lbl.setFont(tf)
         self._time_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        col.addWidget(self._time_lbl)
+        self._time_lbl.setGeometry(178, 136, 320, 137)
 
         self._attempt_lbl = QLabel("Attempt 1", card)
         af = QFont(THEME.font_display)
-        af.setPixelSize(52)
+        af.setPixelSize(64)
         self._attempt_lbl.setFont(af)
         self._attempt_lbl.setObjectName("AttemptLabel")
         self._attempt_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        col.addWidget(self._attempt_lbl)
+        self._attempt_lbl.setGeometry(563, 63, 320, 69)
+
+        self._preview_btn = _PlayYourRhythmButton(card)
+        self._preview_btn.move(595, 152)
+        self._preview_btn.clicked.connect(self._preview_own_rhythm)
 
         self._hint_lbl = QLabel("Press K to submit", card)
         self._hint_lbl.setObjectName("SubmitHint")
-        hf = QFont(THEME.font_display)
-        hf.setPixelSize(36)
+        hf = QFont(THEME.font_numeric)
+        hf.setPixelSize(48)
         self._hint_lbl.setFont(hf)
         self._hint_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        col.addWidget(self._hint_lbl)
+        self._hint_lbl.setStyleSheet(f"color: {THEME.slate}; background: transparent;")
+        self._hint_lbl.setGeometry(559, 246, 328, 48)
 
         self._duck = DuckMascot(flow.character_p2.asset, 124, 137, self)
         self._duck.move(1217, 275)
@@ -219,6 +260,10 @@ class RecreateRhythmP2Page(FlowPage):
 
         rec = self._recreator_player()
         comp = self._composer_player()
+        card_bg = _RR_PLAYER1_CARD_BG if rec == 1 else _RR_PLAYER2_CARD_BG
+        self._card.setStyleSheet(
+            f"QFrame {{ background: {card_bg}; border-radius: 20px; border: none; }}"
+        )
         self._player_title.setText(f"Player {rec}")
         self._duck.set_asset(self._recreator_character().asset)
 
@@ -226,17 +271,26 @@ class RecreateRhythmP2Page(FlowPage):
             self._hint_lbl.setText(
                 f"Player {rec} is recreating the rhythm\u2026"
             )
+            self._hint_lbl.adjustSize()
+            self._hint_lbl.move(559 + (328 - self._hint_lbl.width()) // 2, 246)
+            self._preview_btn.setVisible(False)
             self._strip_lbl.setText(
                 f"Player {rec} is playing your rhythm"
             )
+            self._strip_lbl.adjustSize()
             self._play_icon.setVisible(False)
+            self._play_vector.setVisible(False)
             self._strip.setCursor(Qt.CursorShape.ArrowCursor)
         else:
             self._hint_lbl.setText("Press K to submit")
+            self._hint_lbl.setGeometry(559, 246, 328, 48)
+            self._preview_btn.setVisible(True)
             self._strip_lbl.setText(
                 f"Play Player {comp}'s Rhythm\u2026"
             )
+            self._strip_lbl.adjustSize()
             self._play_icon.setVisible(True)
+            self._play_vector.setVisible(True)
             self._strip.setCursor(Qt.CursorShape.PointingHandCursor)
             role = self.flow.network_role
             if role == NetworkRole.HOST:
@@ -261,6 +315,11 @@ class RecreateRhythmP2Page(FlowPage):
         if self._is_local_spectator():
             return
         self._session.play_reference()
+
+    def _preview_own_rhythm(self) -> None:
+        if self._is_local_spectator():
+            return
+        self._session.play_current()
 
     # ----- input -----------------------------------------------------------
     def keyPressEvent(self, event: QKeyEvent) -> None:

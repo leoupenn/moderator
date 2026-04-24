@@ -30,11 +30,10 @@ class Difficulty(Enum):
 # Character + genre are drawn from the Figma Component palette. Keeping them as
 # enums keeps the navigator strongly typed, with display labels for the picker.
 class Character(Enum):
-    BABY_DUCK = ("Baby Duck", "duck_c1.svg")
-    YOUNG_DUCK = ("Young Duck", "duck_c2.svg")
-    NORMAL_DUCK = ("Normal Duck", "duck_c3.svg")
-    COOL_DUCK = ("Cool Duck", "duck_c4.svg")
-    SPY_DUCK = ("Spy Duck", "duck_c5.svg")
+    BASIC_DUCK = ("Basic Duck", "duck_basic.svg")
+    KING_DUCK = ("King Duck", "duck_king.svg")
+    TOP_HAT_DUCK = ("Top Hat Duck", "duck_top_hat.svg")
+    VARIANT_4_DUCK = ("Variant 4 Duck", "duck_variant4.svg")
 
     @property
     def label(self) -> str:
@@ -116,8 +115,8 @@ class FlowState:
     multiplayer_mode: Optional[MultiplayerMode] = None
     difficulty: Optional[Difficulty] = None
     genre: Optional[Genre] = None
-    character_p1: Character = Character.NORMAL_DUCK
-    character_p2: Character = Character.NORMAL_DUCK
+    character_p1: Character = Character.BASIC_DUCK
+    character_p2: Character = Character.BASIC_DUCK
     rounds_total: int = 5
     current_round: int = 1
     level: LevelTier = LevelTier.NORMAL
@@ -150,8 +149,8 @@ class FlowState:
         self.multiplayer_mode = None
         self.difficulty = None
         self.genre = None
-        self.character_p1 = Character.NORMAL_DUCK
-        self.character_p2 = Character.NORMAL_DUCK
+        self.character_p1 = Character.BASIC_DUCK
+        self.character_p2 = Character.BASIC_DUCK
         self.rounds_total = 5
         self.level = LevelTier.NORMAL
         self.reset_match()
