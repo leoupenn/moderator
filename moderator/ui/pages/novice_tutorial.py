@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...game_logic import SLOTS
+from ...game_logic import SLOTS, binary_pattern_for_playback
 from ...phrase_audio import DEFAULT_COUNT_IN_QUARTERS, note_intervals_from_pattern
 from ...session import FlowState
 from ..theme import DESIGN_H, DESIGN_W, THEME
@@ -836,11 +836,9 @@ def _place_rotated_direction_arrow(parent: QWidget, x: int, y: int, w: int, h: i
 class _NoteTypeBase(NoviceTutorialBase):
     """Shared layout for Eighth/Quarter/Half/Whole note explainers.
 
-    When a ``GameSession`` is attached via :py:meth:`attach_session` *and*
-    :py:attr:`AUTOPLAY_BLOCKS` is set, the page listens to the live hardware
-    pattern and auto-plays the rhythm + advances to the next screen as soon
-    as the physical blocks form the expected figure (one eighth-note block
-    for Eighth, two contiguous blocks for Quarter, etc.).
+    When a ``GameSession`` is attached via :py:meth:`attach_session`, the page
+    listens to the live hardware pattern and auto-plays the rhythm + advances
+    to the next screen as soon as the physical blocks form the expected note.
     """
 
     # Number of contiguous filled grid blocks the connected controller must
@@ -850,6 +848,9 @@ class _NoteTypeBase(NoviceTutorialBase):
     # If True, filled blocks must be exactly ``0 .. AUTOPLAY_BLOCKS-1`` (measure
     # start). If False, any contiguous run of that length counts (eighth note).
     AUTOPLAY_FROM_BLOCK_ZERO: bool = False
+    # Exact 16-slot hardware pattern required for note definition pages. This
+    # keeps two adjacent eighth notes from being accepted as one held quarter.
+    AUTOPLAY_PATTERN: Optional[tuple[int, ...]] = None
 
     def __init__(
         self,
@@ -1058,6 +1059,12 @@ class _NoteTypeBase(NoviceTutorialBase):
     def _on_live_pattern(self, pattern: List[int]) -> None:
         if not self._autoplay_armed or self.AUTOPLAY_BLOCKS is None:
             return
+        if self.AUTOPLAY_PATTERN is not None:
+            if tuple(binary_pattern_for_playback(pattern)) != self.AUTOPLAY_PATTERN:
+                return
+            self._autoplay_armed = False
+            self._play_and_advance()
+            return
         blocks = self._filled_blocks(pattern)
         if len(blocks) != self.AUTOPLAY_BLOCKS:
             return
@@ -1107,6 +1114,7 @@ class _NoteTypeBase(NoviceTutorialBase):
 class NoviceEighthNotePage(_NoteTypeBase):
 
     AUTOPLAY_BLOCKS = 1
+    AUTOPLAY_PATTERN = (1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
     def __init__(self, flow: FlowState, parent: QWidget | None = None) -> None:
         super().__init__(
@@ -1125,6 +1133,7 @@ class NoviceQuarterNotePage(_NoteTypeBase):
 
     AUTOPLAY_BLOCKS = 2
     AUTOPLAY_FROM_BLOCK_ZERO = True
+    AUTOPLAY_PATTERN = (1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
     def __init__(self, flow: FlowState, parent: QWidget | None = None) -> None:
         super().__init__(
@@ -1143,6 +1152,7 @@ class NoviceHalfNotePage(_NoteTypeBase):
 
     AUTOPLAY_BLOCKS = 4
     AUTOPLAY_FROM_BLOCK_ZERO = True
+    AUTOPLAY_PATTERN = (1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0)
 
     def __init__(self, flow: FlowState, parent: QWidget | None = None) -> None:
         super().__init__(

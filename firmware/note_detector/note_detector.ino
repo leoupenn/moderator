@@ -55,7 +55,14 @@ bool          state[16]      = {0};
 float         smoothed[16]   = {0};
 
 static String s_hostLine;
+static unsigned long s_lastNeoPixelLatchMs = 0;
 
+// First physical WS2812 pixels are the most sensitive to data-edge/power
+// quirks. Re-sending the latched buffer keeps a flaky first pixel from
+// decaying/off-color while the rest of the strip remains correct.
+#define NEOPIXEL_REFRESH_MS 500
+
+void latchNeoPixels();
 void setLED(int idx, uint8_t r, uint8_t g, uint8_t b);
 
 static long parseLongAdv(const char*& p) {
@@ -111,7 +118,7 @@ static void applyMLine(const String& line) {
   for (int k = 0; k < 8; k++) {
     setMappedFeedbackPixel(k, rgb[k * 3 + 0], rgb[k * 3 + 1], rgb[k * 3 + 2]);
   }
-  strip.show();
+  latchNeoPixels();
 }
 
 /* Set one feedback LED (k = 0..7) in buffer — host follows with ``S`` to latch. */
@@ -172,7 +179,14 @@ void setup() {
 
   strip.begin();
   strip.setBrightness(50);
+  latchNeoPixels();
+}
+
+void latchNeoPixels() {
   strip.show();
+  delayMicroseconds(300);
+  strip.show();
+  s_lastNeoPixelLatchMs = millis();
 }
 
 void setLED(int idx, uint8_t r, uint8_t g, uint8_t b) {
@@ -180,7 +194,7 @@ void setLED(int idx, uint8_t r, uint8_t g, uint8_t b) {
   if (idx >= 0 && idx < 8) {
     strip.setPixelColor(LED_MAP[idx], strip.Color(r, g, b));
   }
-  strip.show();
+  latchNeoPixels();
 }
 
 void printState() {
@@ -205,7 +219,7 @@ void readLEDCommand() {
         } else if (s_hostLine == "C") {
           strip.clear();
         } else if (s_hostLine == "S") {
-          strip.show();
+          latchNeoPixels();
         } else if (h == 'P' || h == 'p') {
           applyPixelLine(s_hostLine);
         } else {
@@ -222,6 +236,10 @@ void readLEDCommand() {
 
 void loop() {
   readLEDCommand();
+
+  if (millis() - s_lastNeoPixelLatchMs >= NEOPIXEL_REFRESH_MS) {
+    latchNeoPixels();
+  }
 
   unsigned long now = millis();
 

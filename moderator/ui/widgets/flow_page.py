@@ -34,6 +34,7 @@ class FlowPage(QWidget):
         self.setAutoFillBackground(True)
         # Background is painted via the global QSS rule #PageBackground.
         self._role_marker = QLabel("", self)
+        self._role_marker_plain = False
         self._role_marker.setFixedSize(160, 40)
         self._role_marker.move(1197, 32)
         self._role_marker.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -60,6 +61,26 @@ class FlowPage(QWidget):
             self._role_marker.raise_()
             self._help.raise_()
 
+    def configure_role_marker(
+        self,
+        *,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        font_px: int,
+        alignment: Qt.AlignmentFlag,
+        plain: bool,
+    ) -> None:
+        self._role_marker_plain = plain
+        self._role_marker.setFixedSize(width, height)
+        self._role_marker.move(x, y)
+        self._role_marker.setAlignment(alignment)
+        font = QFont(THEME.font_display)
+        font.setPixelSize(font_px)
+        self._role_marker.setFont(font)
+        self._update_role_marker()
+
     def showEvent(self, event) -> None:  # noqa: D401 - Qt override
         super().showEvent(event)
         self._update_role_marker()
@@ -72,9 +93,21 @@ class FlowPage(QWidget):
             self._role_marker.hide()
             return
         player = 2 if role == NetworkRole.CLIENT else 1
+        self._role_marker.setText(f"PLAYER {player}")
+        if self._role_marker_plain:
+            fg = THEME.accent_yellow if player == 2 else THEME.accent_blue
+            self._role_marker.setStyleSheet(
+                "QLabel {"
+                " background: transparent;"
+                f" color: {fg};"
+                " border: none;"
+                "}"
+            )
+            self._role_marker.show()
+            return
+
         bg = THEME.accent_yellow if player == 2 else THEME.accent_blue
         fg = THEME.slate if player == 2 else THEME.white
-        self._role_marker.setText(f"PLAYER {player}")
         self._role_marker.setStyleSheet(
             "QLabel {"
             f" background: {bg};"

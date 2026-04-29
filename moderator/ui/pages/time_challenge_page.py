@@ -1,13 +1,14 @@
-"""Figma 113:2822 (Player 1) / 115:3177 (Player 2) — Time Challenge gameplay.
+"""Figma 261:1877 sibling frames — Time Challenge competitive gameplay.
 
 Refresh of the original head-to-head layout:
 
-* Header ("COMPETITIVE MODE" / "Time Challenge" / "ROUND N") unchanged.
+* Header ("COMPETITIVE MODE" / "Time Challenge" / role marker) matches the
+  updated Player 1 / Player 2 competitive frames.
 * Rhythm strip (1086×130 white pill at y=172) with a play icon on the right —
   clicking the strip plays the preset/reference rhythm after a one-bar (four
   quarter-note) metronome count-in.
-* Two player cards (450×561), gray for P1 and yellow for P2, each stacking
-  Player title · timer digits · attempt counter · submit hint.
+* Two asymmetric player cards: a wide local "You" card and a compact grey
+  remote player card.
 * A single "Play Your Rhythm" orange pill sits inside the *local* player's
   card (P1 for host / solo, P2 for client) so each machine has its own
   local-controller preview. Playback stays local — no network broadcast.
@@ -49,7 +50,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QLabel,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -252,92 +252,80 @@ class _PlayDuotoneIcon(QWidget):
 
 
 class _PlayerCard(QFrame):
-    """A 450×561 stacked card (title / time / attempt / optional play / hint).
+    """Time Challenge player card.
 
-    ``variant`` is ``"p1"`` or ``"p2"`` and picks the background + default
-    submit hint wording. ``show_play_button`` wires in the orange "Play Your
-    Rhythm" pill on the machine that owns this card.
+    Figma's new competitive layout uses an asymmetric card pair:
+    the local player gets a large "You" card, while the remote player gets a
+    compact grey summary card.
     """
 
     play_rhythm = Signal()
 
     def __init__(
         self,
-        name: str,
         *,
         variant: str,
         background: str,
-        show_play_button: bool,
+        local: bool,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setFixedSize(450, 561)
+        self.setFixedSize(636 if local else 290, 561)
         self.setStyleSheet(
             f"QFrame {{ background: {background}; border-radius: 20px; border: none; }}"
         )
 
-        col = QVBoxLayout(self)
-        # Figma inset: pt=20, pl=65, pr=57, pb=42. The pl/pr are symmetric on
-        # content so we average them; the hint sits 471px from the top which
-        # leaves ~48px to the bottom after its 48px height.
-        col.setContentsMargins(65, 20, 57, 42)
-        col.setSpacing(0)
-
-        self.player_title = QLabel(name, self)
+        title = "You" if local else ("Player 1" if variant == "p1" else "Player 2")
+        self.player_title = QLabel(title, self)
         self.player_title.setObjectName("PlayerTitle")
         ptf = QFont(THEME.font_display)
         ptf.setPixelSize(48)
         self.player_title.setFont(ptf)
         self.player_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        col.addWidget(self.player_title)
-
-        col.addSpacing(84)  # Figma gap between title and timer block
+        self.player_title.setGeometry(65, 20, self.width() - 122, 51)
 
         tf = QFont(THEME.font_display)
-        tf.setPixelSize(128)
-        tf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 6.4)
+        tf.setPixelSize(128 if local else 64)
+        tf.setLetterSpacing(
+            QFont.SpacingType.AbsoluteSpacing, 6.4 if local else 3.2
+        )
         self.time_lbl = _StopwatchLabel(tf, self)
         self.time_lbl.setObjectName("TimeDigitsBig")
-        col.addWidget(self.time_lbl)
-
-        col.addSpacing(10)
+        if local:
+            self.time_lbl.setGeometry(65, 155, self.width() - 122, 137)
+        else:
+            self.time_lbl.setGeometry(65, 195, self.width() - 122, 69)
 
         self.attempt_lbl = QLabel("Attempt 1", self)
         self.attempt_lbl.setObjectName("AttemptLabel")
         af = QFont(THEME.font_display)
-        af.setPixelSize(64)
+        af.setPixelSize(64 if local else 40)
         self.attempt_lbl.setFont(af)
         self.attempt_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        col.addWidget(self.attempt_lbl)
+        if local:
+            self.attempt_lbl.setGeometry(65, 302, self.width() - 122, 69)
+        else:
+            self.attempt_lbl.setGeometry(65, 274, self.width() - 122, 43)
 
-        col.addStretch(1)
-
-        if show_play_button:
+        if local:
             self.play_btn: Optional[_PlayButton] = _PlayButton(self)
             self.play_btn.clicked.connect(self.play_rhythm.emit)
-            btn_row = QFrame(self)
-            btn_row.setStyleSheet("background: transparent;")
-            brl = QVBoxLayout(btn_row)
-            brl.setContentsMargins(0, 0, 0, 0)
-            brl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-            brl.addWidget(self.play_btn, 0, Qt.AlignmentFlag.AlignHCenter)
-            col.addWidget(btn_row)
-            col.addSpacing(14)
+            self.play_btn.move((self.width() - self.play_btn.width()) // 2, 394)
+
+            default_hint = "Press D to Submit" if variant == "p1" else "Press K to Submit"
+            self.submit_hint: Optional[QLabel] = QLabel(default_hint, self)
+            self.submit_hint.setObjectName("SubmitHint")
+            sf = QFont(THEME.font_numeric)
+            sf.setPixelSize(48)
+            self.submit_hint.setFont(sf)
+            self.submit_hint.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+            self.submit_hint.setStyleSheet(
+                f"color: {THEME.slate}; background: transparent;"
+            )
+            self.submit_hint.setGeometry(65, 471, self.width() - 122, 48)
         else:
             self.play_btn = None
-
-        default_hint = "Press D to Submit" if variant == "p1" else "Press K to Submit"
-        self.submit_hint = QLabel(default_hint, self)
-        self.submit_hint.setObjectName("SubmitHint")
-        sf = QFont(THEME.font_numeric)
-        sf.setPixelSize(48)
-        self.submit_hint.setFont(sf)
-        self.submit_hint.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        # Match the Figma `#33363F` slate for the submit hint.
-        self.submit_hint.setStyleSheet(
-            f"color: {THEME.slate}; background: transparent;"
-        )
-        col.addWidget(self.submit_hint)
+            self.submit_hint = None
 
     def set_time_ms(self, ms: int) -> None:
         self.time_lbl.setText(_format_ms(ms))
@@ -356,6 +344,15 @@ class TimeChallengePage(FlowPage):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(flow, parent)
+        self.configure_role_marker(
+            x=1261,
+            y=95,
+            width=210,
+            height=43,
+            font_px=40,
+            alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            plain=True,
+        )
         self._session = session
 
         # Keyboard shortcuts must work even when a child widget has focus.
@@ -395,6 +392,7 @@ class TimeChallengePage(FlowPage):
         self._round_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._round_label.adjustSize()
         self._round_label.move(DESIGN_W - 220, 88)
+        self._round_label.hide()
 
         # ----- rhythm strip (clickable, plays local pad pattern) -----------
         self._strip = QFrame(self)
@@ -426,24 +424,22 @@ class TimeChallengePage(FlowPage):
             else _PLAYER_CARD_REMOTE_BG
         )
         self._p1_card = _PlayerCard(
-            "Player 1",
             variant="p1",
             background=p1_bg,
-            show_play_button=local_is_p1,
+            local=local_is_p1,
             parent=self,
         )
-        self.place(self._p1_card, 213, 361)
+        self.place(self._p1_card, 191, 361)
         if self._p1_card.play_btn is not None:
             self._p1_card.play_rhythm.connect(self._on_play_your_rhythm_clicked)
 
         self._p2_card = _PlayerCard(
-            "Player 2",
             variant="p2",
             background=p2_bg,
-            show_play_button=(role == NetworkRole.CLIENT),
+            local=(role == NetworkRole.CLIENT),
             parent=self,
         )
-        self.place(self._p2_card, 849, 361)
+        self.place(self._p2_card, 641 if role == NetworkRole.CLIENT else 1020, 361)
         if self._p2_card.play_btn is not None:
             self._p2_card.play_rhythm.connect(self._on_play_your_rhythm_clicked)
 
@@ -452,7 +448,7 @@ class TimeChallengePage(FlowPage):
         self._p1_duck = p1_duck
 
         p2_duck = DuckMascot(flow.character_p2.asset, 124, 137, self)
-        p2_duck.move(1220, 313)
+        p2_duck.move(1186 if role == NetworkRole.CLIENT else 983, 313)
         self._p2_duck = p2_duck
 
         # Round state. Timings stored in ms. ``elapsed_ms_local_pN`` is what
@@ -525,6 +521,7 @@ class TimeChallengePage(FlowPage):
         self._round_label.setText(f"ROUND {self.flow.current_round}")
         self._round_label.adjustSize()
         self._round_label.move(DESIGN_W - 20 - self._round_label.width(), 88)
+        self._round_label.hide()
         self._last_target = list(target)
         self._session.set_manual_pattern(list(target))
         self._reset_round_visuals()
