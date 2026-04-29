@@ -3,12 +3,19 @@ from __future__ import annotations
 
 from typing import List
 
-from PySide6.QtCore import QEasingCurve, QParallelAnimationGroup, QSize, Qt, Signal
-from PySide6.QtGui import QIcon, QPixmap, QTransform
+from PySide6.QtCore import (
+    Property,
+    QEasingCurve,
+    QPropertyAnimation,
+    QRectF,
+    QSize,
+    Qt,
+    Signal,
+)
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QTransform
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QFrame,
-    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -18,7 +25,6 @@ from PySide6.QtWidgets import (
 
 from ...session.flow_state import Character
 from .asset_loader import asset_path
-from .duck_mascot import DuckMascot
 
 
 _ROW_ORDER: List[Character] = [
@@ -28,17 +34,150 @@ _ROW_ORDER: List[Character] = [
     Character.VARIANT_4_DUCK,
 ]
 
-_DUCK_SIZES = {
-    0: QSize(239, 263),
-    1: QSize(95, 105),
-    2: QSize(55, 61),
-}
+_SELECTED_DUCK_SIZE = QSize(239, 263)
 
-_DUCK_OPACITIES = {
-    0: 1.0,
-    1: 0.75,
-    2: 0.5,
-}
+
+class _DuckCarouselStage(QWidget):
+    """Fixed-size painted carousel so animation never changes layout bounds."""
+
+    _SOURCE_SIZE = QSize(478, 526)
+
+    def __init__(self, order: List[Character], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(608, 315)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self._order = list(order)
+        self._position = 0.0
+        self._animation: QPropertyAnimation | None = None
+        self._pixmaps = {char: self._render_duck(char) for char in self._order}
+
+    def set_index(self, index: int, *, animate: bool) -> None:
+        if self._animation is not None:
+            self._animation.stop()
+            self._animation = None
+        index = index % len(self._order)
+        if not animate:
+            self._position = float(index)
+            self.update()
+            return
+
+        count = len(self._order)
+        delta = ((index - self._position + count / 2) % count) - count / 2
+        if abs(delta) == count / 2:
+            current = int(round(self._position)) % count
+            delta = count / 2 if index > current else -count / 2
+        target = self._position + delta
+
+        anim = QPropertyAnimation(self, b"carouselPosition", self)
+        anim.setDuration(360)
+        anim.setStartValue(self._position)
+        anim.setEndValue(target)
+        anim.setEasingCurve(QEasingCurve.Type.OutBack)
+        anim.finished.connect(lambda: self._finish_animation(index))
+        self._animation = anim
+        anim.start()
+
+    def _finish_animation(self, index: int) -> None:
+        self._position = float(index)
+        self._animation = None
+        self.update()
+
+    def _get_carousel_position(self) -> float:
+        return self._position
+
+    def _set_carousel_position(self, value: float) -> None:
+        self._position = float(value)
+        self.update()
+
+    carouselPosition = Property(float, _get_carousel_position, _set_carousel_position)
+
+    def paintEvent(self, _event) -> None:  # noqa: D401 - Qt override
+        painter = QPainter(self)
+        painter.setRenderHints(
+            QPainter.RenderHint.Antialiasing
+            | QPainter.RenderHint.SmoothPixmapTransform
+            | QPainter.RenderHint.TextAntialiasing
+        )
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+
+        center_x = self.width() / 2
+        baseline_y = 287.0
+        draw_specs = []
+        for i, char in enumerate(self._order):
+            dist = self._signed_distance(i)
+            abs_dist = abs(dist)
+            if abs_dist > 2.05:
+                continue
+            scale = self._scale_for(abs_dist)
+            opacity = self._opacity_for(abs_dist)
+            w = _SELECTED_DUCK_SIZE.width() * scale
+            h = _SELECTED_DUCK_SIZE.height() * scale
+            selected_weight = max(0.0, 1.0 - abs_dist)
+            x = center_x + dist * 130.0 - w / 2
+            y = baseline_y - h - selected_weight * 15.0
+            draw_specs.append(
+                (abs_dist, char, QRectF(x, y, w, h), opacity, selected_weight)
+            )
+
+        for _abs_dist, char, rect, opacity, selected_weight in sorted(
+            draw_specs, key=lambda spec: spec[0], reverse=True
+        ):
+            if selected_weight > 0.01:
+                self._paint_selection_glow(painter, rect, selected_weight)
+            painter.setOpacity(opacity)
+            painter.drawPixmap(
+                rect,
+                self._pixmaps[char],
+                QRectF(self._pixmaps[char].rect()),
+            )
+        painter.setOpacity(1.0)
+        painter.end()
+
+    def _signed_distance(self, index: int) -> float:
+        count = len(self._order)
+        return ((index - self._position + count / 2) % count) - count / 2
+
+    @staticmethod
+    def _scale_for(abs_dist: float) -> float:
+        if abs_dist <= 1.0:
+            return 1.0 - abs_dist * 0.40
+        return max(0.34, 0.60 - (abs_dist - 1.0) * 0.22)
+
+    @staticmethod
+    def _opacity_for(abs_dist: float) -> float:
+        if abs_dist <= 1.0:
+            return 1.0 - abs_dist * 0.34
+        return max(0.20, 0.66 - (abs_dist - 1.0) * 0.38)
+
+    @staticmethod
+    def _paint_selection_glow(painter: QPainter, rect: QRectF, weight: float) -> None:
+        glow = QRectF(rect)
+        glow.adjust(-22, rect.height() * 0.72, 22, 28)
+        painter.setOpacity(0.35 * weight)
+        painter.setBrush(QColor(255, 255, 255, 90))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(glow)
+        painter.setOpacity(0.16 * weight)
+        painter.setBrush(QColor(148, 196, 216, 140))
+        painter.drawEllipse(glow.adjusted(18, 9, -18, -9))
+        painter.setOpacity(1.0)
+
+    @classmethod
+    def _render_duck(cls, character: Character) -> QPixmap:
+        pix = QPixmap(cls._SOURCE_SIZE)
+        pix.fill(Qt.GlobalColor.transparent)
+        renderer = QSvgRenderer(str(asset_path(character.asset)))
+        painter = QPainter(pix)
+        painter.setRenderHints(
+            QPainter.RenderHint.Antialiasing
+            | QPainter.RenderHint.SmoothPixmapTransform
+        )
+        renderer.render(
+            painter,
+            QRectF(0, 0, cls._SOURCE_SIZE.width(), cls._SOURCE_SIZE.height()),
+        )
+        painter.end()
+        return pix
 
 
 class CharacterStrip(QFrame):
@@ -58,32 +197,16 @@ class CharacterStrip(QFrame):
         self.setFixedSize(648, 530)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(20, 28, 20, 28)
-        outer.setSpacing(40)
+        outer.setContentsMargins(20, 24, 20, 22)
+        outer.setSpacing(22)
 
         title = QLabel(player_label)
         title.setObjectName("PlayerTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         outer.addWidget(title)
 
-        ducks_row = QHBoxLayout()
-        ducks_row.setContentsMargins(0, 0, 0, 0)
-        ducks_row.setSpacing(18)
-        ducks_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._duck_widgets: dict[Character, DuckMascot] = {}
-        self._duck_effects: dict[Character, QGraphicsOpacityEffect] = {}
-        self._selection_animation: QParallelAnimationGroup | None = None
-        for char in _ROW_ORDER:
-            d = DuckMascot(char.asset, 95, 105)
-            effect = QGraphicsOpacityEffect(d)
-            d.setGraphicsEffect(effect)
-            self._duck_widgets[char] = d
-            self._duck_effects[char] = effect
-            ducks_row.addWidget(d, 0, Qt.AlignmentFlag.AlignBottom)
-        ducks_host = QWidget()
-        ducks_host.setFixedSize(608, 270)
-        ducks_host.setLayout(ducks_row)
-        outer.addWidget(ducks_host, 0, Qt.AlignmentFlag.AlignCenter)
+        self._duck_stage = _DuckCarouselStage(_ROW_ORDER, self)
+        outer.addWidget(self._duck_stage, 0, Qt.AlignmentFlag.AlignCenter)
 
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
@@ -130,7 +253,10 @@ class CharacterStrip(QFrame):
         renderer.render(painter)
         painter.end()
         if mirror:
-            pix = pix.transformed(QTransform().scale(-1, 1), _Qt.TransformationMode.SmoothTransformation)
+            pix = pix.transformed(
+                QTransform().scale(-1, 1),
+                _Qt.TransformationMode.SmoothTransformation,
+            )
         btn.setIcon(QIcon(pix))
         btn.setIconSize(QSize(size, size))
         return btn
@@ -157,64 +283,4 @@ class CharacterStrip(QFrame):
 
     def _update_selection(self, animate: bool) -> None:
         self._name.setText(self._order[self._idx].label)
-
-        if self._selection_animation is not None:
-            self._selection_animation.stop()
-            self._selection_animation = None
-
-        if not animate:
-            for char, duck in self._duck_widgets.items():
-                size = self._size_for(char)
-                duck.setFixedSize(size)
-                self._duck_effects[char].setOpacity(self._opacity_for(char))
-            return
-
-        group = QParallelAnimationGroup(self)
-        for char, duck in self._duck_widgets.items():
-            size = self._size_for(char)
-            self._add_size_animation(group, duck, b"minimumSize", size)
-            self._add_size_animation(group, duck, b"maximumSize", size)
-
-            opacity_anim = self._make_animation(
-                self._duck_effects[char],
-                b"opacity",
-                self._duck_effects[char].opacity(),
-                self._opacity_for(char),
-            )
-            group.addAnimation(opacity_anim)
-
-        self._selection_animation = group
-        group.finished.connect(lambda: setattr(self, "_selection_animation", None))
-        group.start()
-
-    def _distance_from_current(self, character: Character) -> int:
-        idx = self._order.index(character)
-        raw = abs(idx - self._idx)
-        return min(raw, len(self._order) - raw)
-
-    def _size_for(self, character: Character) -> QSize:
-        return _DUCK_SIZES.get(self._distance_from_current(character), _DUCK_SIZES[2])
-
-    def _opacity_for(self, character: Character) -> float:
-        return _DUCK_OPACITIES.get(self._distance_from_current(character), 0.5)
-
-    def _add_size_animation(
-        self,
-        group: QParallelAnimationGroup,
-        duck: DuckMascot,
-        prop: bytes,
-        end_size: QSize,
-    ) -> None:
-        anim = self._make_animation(duck, prop, duck.property(prop.decode()), end_size)
-        group.addAnimation(anim)
-
-    @staticmethod
-    def _make_animation(obj, prop: bytes, start, end):
-        from PySide6.QtCore import QPropertyAnimation
-
-        anim = QPropertyAnimation(obj, prop)
-        anim.setDuration(180)
-        anim.setStartValue(start)
-        anim.setEndValue(end)
-        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        return anim
+        self._duck_stage.set_index(self._idx, animate=animate)

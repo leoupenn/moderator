@@ -21,7 +21,13 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QKeyEvent
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFrame,
+    QLabel,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ...net import MSG_RR_TARGET
 from ...phrase_audio import DEFAULT_COUNT_IN_QUARTERS
@@ -160,6 +166,11 @@ class RecreateRhythmP1Page(FlowPage):
             "QFrame { background: white; border-radius: 20px; border: none; }"
         )
 
+        reminder_inner = QVBoxLayout(reminder_card)
+        reminder_inner.setContentsMargins(32, 40, 32, 40)
+        reminder_inner.setSpacing(0)
+        reminder_inner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
         reminder_text = QLabel(
             "Make sure to\nremove the blocks\nto make your own\nrhythm!",
             reminder_card,
@@ -167,11 +178,23 @@ class RecreateRhythmP1Page(FlowPage):
         reminder_text.setObjectName("ReminderText")
         rtf = QFont(THEME.font_display)
         rtf.setPixelSize(64)
-        rtf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 3.2)
+        # Wide lines + absolute letter spacing overflow a fixed 530px box when
+        # centered; keep modest spacing so full card width fits comfortably.
+        rtf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.8)
         reminder_text.setFont(rtf)
-        reminder_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        reminder_text.setStyleSheet(f"color: {THEME.slate}; background: transparent;")
-        reminder_text.setGeometry(100, 60, 530, 276)
+        reminder_text.setAlignment(
+            Qt.AlignmentFlag.AlignHCenter
+            | Qt.AlignmentFlag.AlignVCenter
+        )
+        reminder_text.setWordWrap(True)
+        reminder_text.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        reminder_text.setStyleSheet(
+            f"color: {THEME.slate}; background: transparent; padding: 0 4px;"
+        )
+        reminder_inner.addWidget(reminder_text)
         self._reminder_visible = False
 
     # ----- role helpers ----------------------------------------------------
