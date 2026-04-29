@@ -147,7 +147,6 @@ class _StopwatchLabel(QLabel):
     def __init__(self, base_font: QFont, parent: QWidget | None = None) -> None:
         super().__init__("00:00:00", parent)
         self._base_font = QFont(base_font)
-        self.setMinimumHeight(137)
         self.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
 
     def setText(self, text: str) -> None:  # noqa: N802 - Qt API override
@@ -292,9 +291,9 @@ class _PlayerCard(QFrame):
         self.time_lbl = _StopwatchLabel(tf, self)
         self.time_lbl.setObjectName("TimeDigitsBig")
         if local:
-            self.time_lbl.setGeometry(65, 155, self.width() - 122, 137)
+            self.time_lbl.setGeometry(65, 145, self.width() - 122, 137)
         else:
-            self.time_lbl.setGeometry(65, 195, self.width() - 122, 69)
+            self.time_lbl.setGeometry(65, 186, self.width() - 122, 78)
 
         self.attempt_lbl = QLabel("Attempt 1", self)
         self.attempt_lbl.setObjectName("AttemptLabel")
@@ -303,9 +302,9 @@ class _PlayerCard(QFrame):
         self.attempt_lbl.setFont(af)
         self.attempt_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         if local:
-            self.attempt_lbl.setGeometry(65, 302, self.width() - 122, 69)
+            self.attempt_lbl.setGeometry(65, 312, self.width() - 122, 69)
         else:
-            self.attempt_lbl.setGeometry(65, 274, self.width() - 122, 43)
+            self.attempt_lbl.setGeometry(65, 286, self.width() - 122, 43)
 
         if local:
             self.play_btn: Optional[_PlayButton] = _PlayButton(self)

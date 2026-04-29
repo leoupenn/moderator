@@ -3,16 +3,15 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
     QApplication,
-    QHBoxLayout,
+    QGraphicsScene,
+    QGraphicsView,
     QMainWindow,
     QMessageBox,
-    QScrollArea,
     QStackedWidget,
-    QVBoxLayout,
-    QWidget,
 )
 
 from .net import (
@@ -71,6 +70,42 @@ from .ui.pages.novice_tutorial import NoviceWelcomeIntroPage
 from .ui.settings_dialog import SettingsDialog
 
 
+class _DesignCanvasView(QGraphicsView):
+    """Scale the fixed Figma canvas to fit the current window without clipping."""
+
+    def __init__(self, stack: QStackedWidget) -> None:
+        super().__init__()
+        self._stack = stack
+        self._scene = QGraphicsScene(self)
+        self._scene.setSceneRect(QRectF(0, 0, DESIGN_W, DESIGN_H))
+        self._scene.addWidget(stack)
+        self.setScene(self._scene)
+        self.setObjectName("StageView")
+        self.setFrameShape(QGraphicsView.Shape.NoFrame)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setStyleSheet(f"#StageView {{ background: {THEME.bg}; }}")
+
+    def resizeEvent(self, event) -> None:  # noqa: D401 - Qt override
+        super().resizeEvent(event)
+        self._fit_canvas()
+
+    def showEvent(self, event) -> None:  # noqa: D401 - Qt override
+        super().showEvent(event)
+        self._fit_canvas()
+
+    def _fit_canvas(self) -> None:
+        viewport = self.viewport().rect()
+        if viewport.width() <= 0 or viewport.height() <= 0:
+            return
+        scale = min(viewport.width() / DESIGN_W, viewport.height() / DESIGN_H)
+        self.resetTransform()
+        self.scale(scale, scale)
+        self.centerOn(DESIGN_W / 2, DESIGN_H / 2)
+
+
 class MainWindow(QMainWindow):
     """Hosts the page stack, game session, and help-chip settings drawer."""
 
@@ -82,9 +117,9 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(load_app_stylesheet())
-        # Allow the window to shrink on smaller displays, but by default we
-        # expand to fill the primary screen (see ``showEvent``).
-        self.setMinimumSize(1024, 700)
+        # The design canvas scales to fit, so keep the shell's minimum small
+        # enough that compact displays are not forced into clipping.
+        self.setMinimumSize(320, 208)
         self.resize(DESIGN_W, DESIGN_H)
         self._has_filled_screen = False
 
@@ -95,34 +130,11 @@ class MainWindow(QMainWindow):
         # when the client mirrors a host-driven navigation.
         self._applying_remote_nav = False
 
-        # Wrap the 1512×982 design canvas in a scroll area so smaller screens
-        # still get the full fidelity Figma layout.
+        # Keep every page in Figma's 1512×982 coordinate system. The graphics
+        # view scales that canvas to the available screen instead of clipping.
         self._stack = QStackedWidget()
         self._stack.setFixedSize(DESIGN_W, DESIGN_H)
-
-        stage_host = QWidget()
-        stage_host.setObjectName("StageHost")
-        stage_host.setStyleSheet(f"#StageHost {{ background: {THEME.bg}; }}")
-        # Center the 1512×982 canvas both horizontally and vertically so empty
-        # space around it (on larger displays) is symmetric, not left-hanging.
-        v_stage = QVBoxLayout(stage_host)
-        v_stage.setContentsMargins(0, 0, 0, 0)
-        v_stage.addStretch(1)
-        h_row = QHBoxLayout()
-        h_row.setContentsMargins(0, 0, 0, 0)
-        h_row.addStretch(1)
-        h_row.addWidget(self._stack)
-        h_row.addStretch(1)
-        v_stage.addLayout(h_row)
-        v_stage.addStretch(1)
-
-        scroller = QScrollArea()
-        scroller.setWidget(stage_host)
-        scroller.setWidgetResizable(True)
-        scroller.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        scroller.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroller.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.setCentralWidget(scroller)
+        self.setCentralWidget(_DesignCanvasView(self._stack))
 
         self._nav = AppNavigator(self._stack, self)
         self._nav.route_changed.connect(self._on_route_changed)

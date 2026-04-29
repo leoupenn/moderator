@@ -19,7 +19,7 @@ The page decides which machine owns the picker based on
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QKeyEvent
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
@@ -144,6 +144,36 @@ class RecreateRhythmP1Page(FlowPage):
         self._status.setObjectName("StatusLine")
         self._status.setGeometry(35, 920, DESIGN_W - 70, 30)
 
+        self._reminder_overlay = QFrame(self)
+        self._reminder_overlay.setGeometry(0, 0, DESIGN_W, self.height())
+        self._reminder_overlay.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._reminder_overlay.setStyleSheet(
+            "QFrame { background: rgba(0, 0, 0, 128); border: none; }"
+        )
+        self._reminder_overlay.hide()
+        self._reminder_overlay.mousePressEvent = self._dismiss_reminder  # type: ignore[assignment]
+
+        reminder_card = QFrame(self._reminder_overlay)
+        reminder_card.setGeometry(391, 294, 730, 396)
+        reminder_card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        reminder_card.setStyleSheet(
+            "QFrame { background: white; border-radius: 20px; border: none; }"
+        )
+
+        reminder_text = QLabel(
+            "Make sure to\nremove the blocks\nto make your own\nrhythm!",
+            reminder_card,
+        )
+        reminder_text.setObjectName("ReminderText")
+        rtf = QFont(THEME.font_display)
+        rtf.setPixelSize(64)
+        rtf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 3.2)
+        reminder_text.setFont(rtf)
+        reminder_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        reminder_text.setStyleSheet(f"color: {THEME.slate}; background: transparent;")
+        reminder_text.setGeometry(100, 60, 530, 276)
+        self._reminder_visible = False
+
     # ----- role helpers ----------------------------------------------------
     def _composer_player(self) -> int:
         return rr_composer_player(self.flow.current_round)
@@ -180,6 +210,10 @@ class RecreateRhythmP1Page(FlowPage):
             self._bpm.set_value(self.flow.bpm)
             self._status.setText("")
             self.setFocus(Qt.FocusReason.OtherFocusReason)
+            if self.flow.current_round > 1:
+                self._show_reminder()
+            else:
+                self._hide_reminder()
         else:
             # Remote player is composing; we render a passive wait screen.
             self._hero.setText("Waiting for Player {}\u2026".format(composer))
@@ -189,6 +223,7 @@ class RecreateRhythmP1Page(FlowPage):
             self._submit_btn.setVisible(False)
             self._preview_btn.setVisible(False)
             self._status.setText("")
+            self._hide_reminder()
 
     # ----- interactive (composer) hooks -----------------------------------
     def _on_bpm(self, v: int) -> None:
@@ -207,6 +242,8 @@ class RecreateRhythmP1Page(FlowPage):
 
     def _preview_own_rhythm(self) -> None:
         """Preview live pad pattern; one measure count-in on each player's first compose turn (round 1 for P1, round 2 for P2)."""
+        if self._reminder_visible:
+            return
         if not self._is_local_composer():
             return
         composer = self._composer_player()
@@ -215,6 +252,8 @@ class RecreateRhythmP1Page(FlowPage):
         self._session.play_current(count_in_quarters=n)
 
     def _submit(self) -> None:
+        if self._reminder_visible:
+            return
         if not self._is_local_composer():
             return
         ok = self._session.p1_submit()
@@ -248,6 +287,9 @@ class RecreateRhythmP1Page(FlowPage):
                 )
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        if self._reminder_visible:
+            self._hide_reminder()
+            return
         if not self._is_local_composer():
             super().keyPressEvent(event)
             return
@@ -257,6 +299,22 @@ class RecreateRhythmP1Page(FlowPage):
             self._preview_own_rhythm()
         else:
             super().keyPressEvent(event)
+
+    def _show_reminder(self) -> None:
+        self._reminder_visible = True
+        self._reminder_overlay.show()
+        self._reminder_overlay.raise_()
+        # The Figma frame has no explicit button. Keep it transient, but allow
+        # click/key dismissal so players can move on as soon as they are ready.
+        QTimer.singleShot(3000, self._hide_reminder)
+
+    def _hide_reminder(self) -> None:
+        self._reminder_visible = False
+        self._reminder_overlay.hide()
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _dismiss_reminder(self, _event) -> None:
+        self._hide_reminder()
 
     # ----- helpers ---------------------------------------------------------
     def _main_window(self):
