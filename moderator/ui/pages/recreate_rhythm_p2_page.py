@@ -7,8 +7,9 @@ Players swap composer / recreator duties every round (see
   pattern, ``K`` / ``Return`` submits, ``Space`` replays the composer's
   rhythm. Grading is local against the pattern seeded by ``MSG_RR_TARGET``
   (or by ``GameSession.p1_submit`` on the host when the host composed).
-  Every submit emits ``MSG_RR_ATTEMPT`` so the spectator mirror updates;
-  the final ``MSG_RR_RESULT`` tells the peer the round is over.
+  Every submit emits ``MSG_RR_ATTEMPT`` so the spectator mirror updates
+  neutral progress; red/green grading stays on the recreator's laptop and
+  controller. The final ``MSG_RR_RESULT`` tells the peer the round is over.
 * **Local spectator**: passive mirror. Strip click, submit and keys are
   disabled so the composer can't grade for the other player. The timer
   ticks locally for smoothness and re-anchors to every authoritative
@@ -63,9 +64,13 @@ from ..widgets.asset_loader import svg_widget
 
 _RR_PLAYER1_CARD_BG = THEME.accent_blue
 _RR_PLAYER2_CARD_BG = THEME.accent_yellow
-_RR_PLAY_YOUR_RHYTHM_BG = "#0C8CE9"
-_RR_PLAY_YOUR_RHYTHM_HOVER = "#1F9AF2"
-_RR_PLAY_YOUR_RHYTHM_PRESSED = "#0873C1"
+# Recreator P1: blue pill (matches prior Figma). Recreator P2: orange (Time Challenge / sandbox).
+_RR_PLAY_P1_BG = "#0C8CE9"
+_RR_PLAY_P1_HOVER = "#1F9AF2"
+_RR_PLAY_P1_PRESSED = "#0873C1"
+_RR_PLAY_P2_BG = "#E48706"
+_RR_PLAY_P2_HOVER = "#F29823"
+_RR_PLAY_P2_PRESSED = "#C27405"
 
 
 def _format_ms(ms: int) -> str:
@@ -113,7 +118,7 @@ class _StopwatchLabel(QLabel):
 
 
 class _PlayYourRhythmButton(QPushButton):
-    """Blue Figma pill used to preview the local recreator's controller rhythm."""
+    """Pill to preview the local recreator's controller rhythm (blue P1 / orange P2)."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Play Your Rhythm", parent)
@@ -122,19 +127,26 @@ class _PlayYourRhythmButton(QPushButton):
         f = QFont(THEME.font_display)
         f.setPixelSize(30)
         self.setFont(f)
+        self.set_for_recreator(1)
+
+    def set_for_recreator(self, recreator_player: int) -> None:
+        if recreator_player == 2:
+            bg, hover, pressed = _RR_PLAY_P2_BG, _RR_PLAY_P2_HOVER, _RR_PLAY_P2_PRESSED
+        else:
+            bg, hover, pressed = _RR_PLAY_P1_BG, _RR_PLAY_P1_HOVER, _RR_PLAY_P1_PRESSED
         self.setStyleSheet(
             "QPushButton {"
-            f"  background: {_RR_PLAY_YOUR_RHYTHM_BG};"
+            f"  background: {bg};"
             "   color: white;"
             "   border: none;"
             "   border-radius: 37px;"
             "   padding: 0;"
             "}"
             "QPushButton:hover {"
-            f"  background: {_RR_PLAY_YOUR_RHYTHM_HOVER};"
+            f"  background: {hover};"
             "}"
             "QPushButton:pressed {"
-            f"  background: {_RR_PLAY_YOUR_RHYTHM_PRESSED};"
+            f"  background: {pressed};"
             "}"
             "QPushButton:disabled {"
             "   color: rgba(255,255,255,140);"
@@ -343,6 +355,7 @@ class RecreateRhythmP2Page(FlowPage):
         )
         self._player_title.setText(f"Player {rec}")
         self._duck.set_asset(self._recreator_character().asset)
+        self._preview_btn.set_for_recreator(rec)
 
         if self._is_local_spectator():
             self._hint_lbl.setText(
@@ -462,6 +475,8 @@ class RecreateRhythmP2Page(FlowPage):
 
     def apply_remote_attempt(self, msg: dict) -> None:
         """Incoming ``MSG_RR_ATTEMPT`` \u2014 update the spectator card."""
+        # Keep red/green grading local to the recreator; spectators only mirror
+        # neutral progress so feedback does not appear on the wrong laptop.
         if not self._is_local_spectator() or self._finished:
             return
         try:
@@ -469,7 +484,7 @@ class RecreateRhythmP2Page(FlowPage):
             elapsed_ms = int(msg.get("elapsed_ms", self._elapsed_ms))
         except (TypeError, ValueError):
             return
-        matches = msg.get("matches") or []
+        pattern = msg.get("pattern") or []
         self._attempts = max(1, attempts)
         self._attempt_lbl.setText(f"Attempt {self._attempts}")
         self._elapsed_ms = max(0, elapsed_ms)
@@ -477,8 +492,8 @@ class RecreateRhythmP2Page(FlowPage):
         # Re-anchor the spectator tick so the number keeps climbing smoothly
         # from the authoritative value instead of snapping backwards.
         self._match_start = time.monotonic() - (self._elapsed_ms / 1000.0)
-        if isinstance(matches, list) and len(matches) == SLOTS:
-            self._track.set_feedback([bool(v) for v in matches])
+        if isinstance(pattern, list) and len(pattern) == SLOTS:
+            self._track.set_live_pattern(binary_pattern_for_playback(pattern))
 
     def apply_remote_result(self, msg: dict) -> None:
         """Incoming ``MSG_RR_RESULT``.
@@ -504,8 +519,8 @@ class RecreateRhythmP2Page(FlowPage):
         self._attempt_lbl.setText(f"Attempt {self._attempts}")
         self._elapsed_ms = max(0, elapsed_ms)
         self._set_time_ms(self._elapsed_ms)
-        if not win:
-            self._track.set_feedback([False] * SLOTS)
+        # Keep spectator grid neutral on round end. Red/green feedback is only
+        # shown locally on the recreator's machine.
 
         if self.flow.network_role == NetworkRole.HOST:
             self._record_score_for_round(win=win)
@@ -596,7 +611,6 @@ class RecreateRhythmP2Page(FlowPage):
         mw.net.send(
             MSG_RR_ATTEMPT,
             pattern=list(pattern),
-            matches=[bool(v) for v in matches],
             attempts=int(self._attempts),
             elapsed_ms=int(self._elapsed_ms),
         )

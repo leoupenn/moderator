@@ -113,10 +113,10 @@ MSG_TIME_CHALLENGE_CONTROL = "time_challenge_control"
 #   {"type":"rr_target","pattern":[0/1 x 16],"bpm":80,"round":1}
 MSG_RR_TARGET = "rr_target"
 
-# C -> H: Recreate Rhythm — client's live attempt progress. Sent on every
-# submit so the host's spectator mirror can render the wordle grid, attempt
-# counter, and elapsed timer without owning the input pad.
-#   {"type":"rr_attempt","pattern":[0/1 x 16],"matches":[bool x 16],
+# C -> H: Recreate Rhythm — recreator's submitted attempt progress. Sent on
+# every submit so the spectator mirror can render neutral progress (pattern,
+# attempt counter, and elapsed timer) without receiving grading feedback.
+#   {"type":"rr_attempt","pattern":[0/1 x 16],
 #    "attempts":<int>,"elapsed_ms":<int>}
 MSG_RR_ATTEMPT = "rr_attempt"
 
