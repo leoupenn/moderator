@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QWidget
 
 from ...session.flow_state import NetworkRole
 from ..theme import DESIGN_H, DESIGN_W, THEME
@@ -53,18 +53,26 @@ class FlowPage(QWidget):
         return self._help
 
     def _main_window(self) -> Optional[QWidget]:
-        """Top-level ``MainWindow`` for ``.net`` / ``broadcast_state`` (not parent chain).
+        """Resolve the running ``MainWindow`` (owns ``.net`` / ``broadcast_state``).
 
-        The page stack may sit under a ``QGraphicsView`` proxy; walking
-        ``parentWidget()`` no longer reaches ``QMainWindow``. ``window()`` does.
+        The page stack is hosted inside a ``QGraphicsScene`` proxy, which
+        breaks the QWidget parent chain — ``parentWidget()`` and
+        ``self.window()`` return the orphaned stack rather than the main
+        window. The cross-cutting fix is to find the only running
+        ``QMainWindow`` that exposes ``.net`` via the QApplication registry.
         """
-        win = self.window()
-        if win is not None and hasattr(win, "net"):
-            return win
         w = self.parentWidget()
         while w is not None and not hasattr(w, "net"):
             w = w.parentWidget()
-        return w
+        if w is not None:
+            return w
+        app = QApplication.instance()
+        if app is None:
+            return None
+        for top in app.topLevelWidgets():
+            if isinstance(top, QMainWindow) and hasattr(top, "net"):
+                return top
+        return None
 
     def place(self, widget: QWidget, x: int, y: int, *, raise_: bool = False) -> None:
         widget.setParent(self)
