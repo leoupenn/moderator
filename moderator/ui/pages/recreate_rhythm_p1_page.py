@@ -77,16 +77,16 @@ class RecreateRhythmP1Page(FlowPage):
         self._round_label.adjustSize()
         self._round_label.move(DESIGN_W - 220, 88)
 
-        card = QFrame(self)
-        card.setObjectName("CardBlue")
-        card.setGeometry(352, 266, 866, 520)
+        self._card = QFrame(self)
+        self._card.setObjectName("ComposerCard")
+        self._card.setGeometry(352, 266, 866, 520)
 
-        col = QVBoxLayout(card)
+        col = QVBoxLayout(self._card)
         col.setContentsMargins(48, 28, 48, 48)
         col.setSpacing(22)
         col.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-        self._player_title = QLabel("Player 1", card)
+        self._player_title = QLabel("Player 1", self._card)
         self._player_title.setObjectName("PlayerTitle")
         pf = QFont(THEME.font_display)
         pf.setPixelSize(48)
@@ -94,7 +94,7 @@ class RecreateRhythmP1Page(FlowPage):
         self._player_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         col.addWidget(self._player_title)
 
-        self._hero = QLabel("Make a Rhythm!", card)
+        self._hero = QLabel("Make a Rhythm!", self._card)
         self._hero.setObjectName("TimeDigits")
         hf = QFont(THEME.font_display)
         hf.setPixelSize(96)
@@ -102,11 +102,11 @@ class RecreateRhythmP1Page(FlowPage):
         self._hero.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         col.addWidget(self._hero)
 
-        self._bpm = BpmInput(flow.bpm, card)
+        self._bpm = BpmInput(flow.bpm, self._card)
         col.addWidget(self._bpm, 0, Qt.AlignmentFlag.AlignHCenter)
         self._bpm.value_changed.connect(self._on_bpm)
 
-        self._hint = QLabel("Press D to submit", card)
+        self._hint = QLabel("Press D to submit", self._card)
         self._hint.setObjectName("SubmitHint")
         hf2 = QFont(THEME.font_display)
         hf2.setPixelSize(36)
@@ -196,6 +196,14 @@ class RecreateRhythmP1Page(FlowPage):
 
         composer = self._composer_player()
         self._player_title.setText(f"Player {composer}")
+        card_bg = THEME.accent_yellow if composer == 2 else THEME.accent_blue
+        self._card.setStyleSheet(
+            "QFrame#ComposerCard {"
+            f" background: {card_bg};"
+            " border-radius: 20px;"
+            " border: none;"
+            "}"
+        )
 
         if self._is_local_composer():
             # Local player owns the composer seat for this round.
@@ -315,10 +323,3 @@ class RecreateRhythmP1Page(FlowPage):
 
     def _dismiss_reminder(self, _event) -> None:
         self._hide_reminder()
-
-    # ----- helpers ---------------------------------------------------------
-    def _main_window(self):
-        w = self.parentWidget()
-        while w is not None and not hasattr(w, "net"):
-            w = w.parentWidget()
-        return w

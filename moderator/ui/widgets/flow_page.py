@@ -1,7 +1,7 @@
 """Base page class — provides design-canvas positioning and a persistent Help chip."""
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
@@ -51,6 +51,20 @@ class FlowPage(QWidget):
     @property
     def help_button(self) -> HelpButton:
         return self._help
+
+    def _main_window(self) -> Optional[QWidget]:
+        """Top-level ``MainWindow`` for ``.net`` / ``broadcast_state`` (not parent chain).
+
+        The page stack may sit under a ``QGraphicsView`` proxy; walking
+        ``parentWidget()`` no longer reaches ``QMainWindow``. ``window()`` does.
+        """
+        win = self.window()
+        if win is not None and hasattr(win, "net"):
+            return win
+        w = self.parentWidget()
+        while w is not None and not hasattr(w, "net"):
+            w = w.parentWidget()
+        return w
 
     def place(self, widget: QWidget, x: int, y: int, *, raise_: bool = False) -> None:
         widget.setParent(self)

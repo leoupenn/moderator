@@ -126,9 +126,3 @@ class LevelsPage(FlowPage):
         tempo = {LevelTier.EASY: 60, LevelTier.NORMAL: 80, LevelTier.EXPERT: 110}[tier]
         self.flow.bpm = tempo
         self.selected.emit(tier)
-
-    def _main_window(self):
-        w = self.parentWidget()
-        while w is not None and not hasattr(w, "net"):
-            w = w.parentWidget()
-        return w

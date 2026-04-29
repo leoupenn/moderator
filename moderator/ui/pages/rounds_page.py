@@ -170,10 +170,3 @@ class RoundsPage(FlowPage):
         self.flow.rounds_total = rounds
         self.flow.reset_match()
         self.confirmed.emit(rounds)
-
-    # ----- helpers -------------------------------------------------------
-    def _main_window(self):
-        w = self.parentWidget()
-        while w is not None and not hasattr(w, "net"):
-            w = w.parentWidget()
-        return w

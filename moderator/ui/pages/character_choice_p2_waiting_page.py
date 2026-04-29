@@ -46,7 +46,7 @@ class CharacterChoiceP2WaitingPage(FlowPage):
         self._sub.adjustSize()
         self._sub.move(45, 169)
 
-        self._strip = CharacterStrip("Player 2", self)
+        self._strip = CharacterStrip("Player 2", self, card_style="CardYellow")
         self._strip.move((DESIGN_W - 648) // 2, 271)
         self._strip.set_current(flow.character_p2)
         self._strip.selection_changed.connect(self._on_strip_changed)
@@ -124,13 +124,6 @@ class CharacterChoiceP2WaitingPage(FlowPage):
     def apply_remote_selection(self) -> None:
         """MainWindow calls this when an inbound character_select lands."""
         self._strip.set_current(self.flow.character_p2, animate=True)
-
-    # ----- helpers -------------------------------------------------------
-    def _main_window(self):
-        w = self.parentWidget()
-        while w is not None and not hasattr(w, "net"):
-            w = w.parentWidget()
-        return w
 
     # ----- overlay -------------------------------------------------------
     def _build_overlay(self) -> QFrame:

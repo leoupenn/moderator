@@ -890,10 +890,3 @@ class TimeChallengePage(FlowPage):
         if self._start_epoch_ms is None:
             return 0
         return max(0, int(time.time() * 1000) - self._start_epoch_ms)
-
-    def _main_window(self):
-        """Walk up the parent chain to the MainWindow that owns the NetworkManager."""
-        w = self.parentWidget()
-        while w is not None and not hasattr(w, "net"):
-            w = w.parentWidget()
-        return w

@@ -181,9 +181,3 @@ class ResultsPage(FlowPage):
         else:
             self.flow.current_round += 1
             self.next_round.emit()
-
-    def _main_window(self):
-        w = self.parentWidget()
-        while w is not None and not hasattr(w, "net"):
-            w = w.parentWidget()
-        return w

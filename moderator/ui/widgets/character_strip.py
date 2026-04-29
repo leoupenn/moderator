@@ -42,7 +42,7 @@ _DUCK_OPACITIES = {
 
 
 class CharacterStrip(QFrame):
-    """Blue rounded card containing the duck lineup and selection controls."""
+    """Rounded player card containing the duck lineup and selection controls."""
 
     selection_changed = Signal(object)  # Character
 
@@ -50,9 +50,11 @@ class CharacterStrip(QFrame):
         self,
         player_label: str = "Player 1",
         parent: QWidget | None = None,
+        *,
+        card_style: str = "CardBlue",
     ) -> None:
         super().__init__(parent)
-        self.setObjectName("CardBlue")
+        self.setObjectName(card_style)
         self.setFixedSize(648, 530)
 
         outer = QVBoxLayout(self)
@@ -79,6 +81,7 @@ class CharacterStrip(QFrame):
             self._duck_effects[char] = effect
             ducks_row.addWidget(d, 0, Qt.AlignmentFlag.AlignBottom)
         ducks_host = QWidget()
+        ducks_host.setFixedSize(608, 270)
         ducks_host.setLayout(ducks_row)
         outer.addWidget(ducks_host, 0, Qt.AlignmentFlag.AlignCenter)
 

@@ -615,9 +615,3 @@ class RecreateRhythmP2Page(FlowPage):
             attempts=int(self._attempts),
             elapsed_ms=int(self._elapsed_ms),
         )
-
-    def _main_window(self):
-        w = self.parentWidget()
-        while w is not None and not hasattr(w, "net"):
-            w = w.parentWidget()
-        return w
