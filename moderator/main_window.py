@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QPainter
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsScene,
@@ -78,11 +78,13 @@ class _DesignCanvasView(QGraphicsView):
         self._stack = stack
         self._scene = QGraphicsScene(self)
         self._scene.setSceneRect(QRectF(0, 0, DESIGN_W, DESIGN_H))
+        self._scene.setBackgroundBrush(QColor(THEME.bg))
         self._scene.addWidget(stack)
         self.setScene(self._scene)
         self.setObjectName("StageView")
         self.setFrameShape(QGraphicsView.Shape.NoFrame)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setBackgroundBrush(QColor(THEME.bg))
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -133,7 +135,10 @@ class MainWindow(QMainWindow):
         # Keep every page in Figma's 1512×982 coordinate system. The graphics
         # view scales that canvas to the available screen instead of clipping.
         self._stack = QStackedWidget()
+        self._stack.setObjectName("DesignStack")
         self._stack.setFixedSize(DESIGN_W, DESIGN_H)
+        self._stack.setAutoFillBackground(True)
+        self._stack.setStyleSheet(f"#DesignStack {{ background: {THEME.bg}; border: none; }}")
         self.setCentralWidget(_DesignCanvasView(self._stack))
 
         self._nav = AppNavigator(self._stack, self)
