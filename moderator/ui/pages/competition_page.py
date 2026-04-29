@@ -1,10 +1,11 @@
 """Figma 17:272 — Competitive Mode 'What Competition Form Would you Like?'."""
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QWidget
 
-from ...session import FlowState, MultiplayerMode
+from ...session import FlowState, MultiplayerMode, NetworkRole
 from ._binary_choice import BinaryChoicePage
 
 
@@ -24,6 +25,20 @@ class CompetitionPage(BinaryChoicePage):
         self.connect_left(lambda: self._pick(MultiplayerMode.TIME_CHALLENGE))
         self.connect_right(lambda: self._pick(MultiplayerMode.RECREATE_RHYTHM))
 
+    def on_enter(self) -> None:
+        host_owned = self.flow.network_role == NetworkRole.CLIENT
+        for btn in (self._left, self._right):
+            btn.setEnabled(not host_owned)
+            btn.setCursor(
+                QCursor(
+                    Qt.CursorShape.ArrowCursor
+                    if host_owned
+                    else Qt.CursorShape.PointingHandCursor
+                )
+            )
+
     def _pick(self, m: MultiplayerMode) -> None:
+        if self.flow.network_role == NetworkRole.CLIENT:
+            return
         self.flow.multiplayer_mode = m
         self.mode_selected.emit(m)

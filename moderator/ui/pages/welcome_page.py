@@ -6,10 +6,10 @@ are taken straight from `get_design_context` output; do not drift from them.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QCursor, QFont
 from PySide6.QtWidgets import QLabel, QWidget
 
-from ...session import FlowState, GameMode
+from ...session import FlowState, GameMode, NetworkRole
 from ..theme import THEME
 from ..widgets import ChoiceButton, ChoiceStyle, FlowPage
 from ..widgets.asset_loader import svg_widget
@@ -43,16 +43,30 @@ class WelcomePage(FlowPage):
             d = svg_widget("duck_med.svg", 67, 74, self)
             d.move(x, 641)
 
-        single = ChoiceButton("Single Player", ChoiceStyle.BLUE, parent=self)
-        single.adjustSize()
-        single.move(370, 695)
-        single.clicked.connect(lambda: self._emit(GameMode.SINGLE))
+        self._single = ChoiceButton("Single Player", ChoiceStyle.BLUE, parent=self)
+        self._single.adjustSize()
+        self._single.move(370, 695)
+        self._single.clicked.connect(lambda: self._emit(GameMode.SINGLE))
 
-        multi = ChoiceButton("Multiplayer", ChoiceStyle.YELLOW, parent=self)
-        multi.setFixedWidth(334)
-        multi.move(791, 695)
-        multi.clicked.connect(lambda: self._emit(GameMode.MULTI))
+        self._multi = ChoiceButton("Multiplayer", ChoiceStyle.YELLOW, parent=self)
+        self._multi.setFixedWidth(334)
+        self._multi.move(791, 695)
+        self._multi.clicked.connect(lambda: self._emit(GameMode.MULTI))
+
+    def on_enter(self) -> None:
+        host_owned = self.flow.network_role == NetworkRole.CLIENT
+        for btn in (self._single, self._multi):
+            btn.setEnabled(not host_owned)
+            btn.setCursor(
+                QCursor(
+                    Qt.CursorShape.ArrowCursor
+                    if host_owned
+                    else Qt.CursorShape.PointingHandCursor
+                )
+            )
 
     def _emit(self, mode: GameMode) -> None:
+        if self.flow.network_role == NetworkRole.CLIENT:
+            return
         self.flow.mode = mode
         self.mode_selected.emit(mode)

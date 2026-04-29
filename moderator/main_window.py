@@ -341,6 +341,8 @@ class MainWindow(QMainWindow):
         self._nav.go("time_challenge")
 
     def _on_mode_selected(self, mode: GameMode) -> None:
+        if self._flow.network_role == NetworkRole.CLIENT:
+            return
         self._flow.reset_match()
         if mode == GameMode.SINGLE:
             # Skip the undecorated Introduction (8:74) — it's redundant with

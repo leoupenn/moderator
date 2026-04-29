@@ -135,6 +135,50 @@ def _format_ms(ms: int) -> str:
     return f"{m:02d}:{s:02d}:{cs:02d}"
 
 
+class _StopwatchLabel(QLabel):
+    """Paint large timer text without clipping by fitting horizontally.
+
+    The design uses very tall digits plus letter spacing. In the player cards,
+    the available width can be narrower than the rendered string on machines
+    with wider font substitution. Instead of shrinking the timer vertically, we
+    keep the design font size and compress the painter's x-axis only as needed.
+    """
+
+    def __init__(self, base_font: QFont, parent: QWidget | None = None) -> None:
+        super().__init__("00:00:00", parent)
+        self._base_font = QFont(base_font)
+        self.setMinimumHeight(137)
+        self.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
+
+    def setText(self, text: str) -> None:  # noqa: N802 - Qt API override
+        super().setText(text)
+        self.update()
+
+    def paintEvent(self, _event: QPaintEvent) -> None:
+        text = self.text()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        painter.setPen(QColor(THEME.white))
+        painter.setFont(self._base_font)
+        metrics = painter.fontMetrics()
+        text_w = max(1, metrics.horizontalAdvance(text))
+        available_w = max(1, self.width() - 4)
+        scale_x = min(1.0, available_w / text_w)
+        painter.save()
+        painter.scale(scale_x, 1.0)
+        logical_w = self.width() / scale_x
+        painter.drawText(
+            0,
+            0,
+            int(logical_w),
+            self.height(),
+            int(Qt.AlignmentFlag.AlignCenter),
+            text,
+        )
+        painter.restore()
+        painter.end()
+
+
 class _PlayButton(QPushButton):
     """Orange "Play Your Rhythm" pill that lives inside a player's card."""
 
@@ -249,13 +293,11 @@ class _PlayerCard(QFrame):
 
         col.addSpacing(84)  # Figma gap between title and timer block
 
-        self.time_lbl = QLabel("00:00:00", self)
-        self.time_lbl.setObjectName("TimeDigitsBig")
         tf = QFont(THEME.font_display)
         tf.setPixelSize(128)
         tf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 6.4)
-        self.time_lbl.setFont(tf)
-        self.time_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.time_lbl = _StopwatchLabel(tf, self)
+        self.time_lbl.setObjectName("TimeDigitsBig")
         col.addWidget(self.time_lbl)
 
         col.addSpacing(10)

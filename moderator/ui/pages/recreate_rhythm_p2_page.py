@@ -24,8 +24,19 @@ from __future__ import annotations
 import time
 from typing import List, Optional
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QCursor, QFont, QKeyEvent, QMouseEvent
+from PySide6.QtCore import QPointF, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QCursor,
+    QFont,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+    QPen,
+    QPolygonF,
+)
 from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QWidget
 
 from ...game_logic import (
@@ -34,6 +45,7 @@ from ...game_logic import (
     binary_pattern_for_playback,
 )
 from ...net import MSG_RR_ATTEMPT, MSG_RR_RESULT
+from ...phrase_audio import DEFAULT_COUNT_IN_QUARTERS
 from ...session import FlowState, GameSession, NetworkRole
 from ...session.flow_state import (
     RoundScore,
@@ -64,15 +76,51 @@ def _format_ms(ms: int) -> str:
     return f"{m:02d}:{s:02d}:{cs:02d}"
 
 
+class _StopwatchLabel(QLabel):
+    """Paint large timer text without clipping by fitting horizontally."""
+
+    def __init__(self, base_font: QFont, parent: QWidget | None = None) -> None:
+        super().__init__("00:00:00", parent)
+        self._base_font = QFont(base_font)
+        self.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
+
+    def setText(self, text: str) -> None:  # noqa: N802 - Qt API override
+        super().setText(text)
+        self.update()
+
+    def paintEvent(self, _event: QPaintEvent) -> None:
+        text = self.text()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        painter.setPen(QColor(THEME.white))
+        painter.setFont(self._base_font)
+        metrics = painter.fontMetrics()
+        text_w = max(1, metrics.horizontalAdvance(text))
+        available_w = max(1, self.width() - 4)
+        scale_x = min(1.0, available_w / text_w)
+        painter.save()
+        painter.scale(scale_x, 1.0)
+        painter.drawText(
+            0,
+            0,
+            int(self.width() / scale_x),
+            self.height(),
+            int(Qt.AlignmentFlag.AlignCenter),
+            text,
+        )
+        painter.restore()
+        painter.end()
+
+
 class _PlayYourRhythmButton(QPushButton):
     """Blue Figma pill used to preview the local recreator's controller rhythm."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Play Your Rhythm", parent)
-        self.setFixedSize(256, 74)
+        self.setFixedSize(288, 74)
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         f = QFont(THEME.font_display)
-        f.setPixelSize(32)
+        f.setPixelSize(30)
         self.setFont(f)
         self.setStyleSheet(
             "QPushButton {"
@@ -80,7 +128,7 @@ class _PlayYourRhythmButton(QPushButton):
             "   color: white;"
             "   border: none;"
             "   border-radius: 37px;"
-            "   padding: 0 24px;"
+            "   padding: 0;"
             "}"
             "QPushButton:hover {"
             f"  background: {_RR_PLAY_YOUR_RHYTHM_HOVER};"
@@ -92,6 +140,39 @@ class _PlayYourRhythmButton(QPushButton):
             "   color: rgba(255,255,255,140);"
             "}"
         )
+
+
+class _PlayDuotoneIcon(QWidget):
+    """Right-facing play icon matching Figma without relying on flipped SVG state."""
+
+    def __init__(self, diameter: int, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(diameter, diameter)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def paintEvent(self, _event: QPaintEvent) -> None:
+        d = float(min(self.width(), self.height()))
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        p.setPen(QPen(Qt.PenStyle.NoPen))
+        p.setBrush(QBrush(QColor(42, 65, 87, 61)))  # #2A4157 at ~24% alpha
+        p.drawEllipse(QPointF(d / 2, d / 2), d * 0.375, d * 0.375)
+
+        t_h = d * 0.32
+        t_w = t_h * 0.90
+        cx = d / 2 + d * 0.035
+        cy = d / 2
+        tri = QPolygonF(
+            [
+                QPointF(cx - t_w / 2, cy - t_h / 2),
+                QPointF(cx + t_w / 2, cy),
+                QPointF(cx - t_w / 2, cy + t_h / 2),
+            ]
+        )
+        p.setBrush(QBrush(QColor("#222222")))
+        p.drawPolygon(tri)
+        p.end()
 
 
 class RecreateRhythmP2Page(FlowPage):
@@ -148,10 +229,8 @@ class RecreateRhythmP2Page(FlowPage):
         self._strip_lbl.adjustSize()
         self._strip_lbl.move(50, 28)
 
-        self._play_icon = svg_widget("play_ellipse.svg", 80, 80, self._strip)
+        self._play_icon = _PlayDuotoneIcon(80, self._strip)
         self._play_icon.move(986, 8)
-        self._play_vector = svg_widget("play_vector.svg", 27, 27, self._strip)
-        self._play_vector.move(1016, 35)
         self._strip.mousePressEvent = self._strip_clicked  # type: ignore[assignment]
 
         card = QFrame(self)
@@ -166,13 +245,11 @@ class RecreateRhythmP2Page(FlowPage):
         self._player_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self._player_title.setGeometry(178, 85, 320, 51)
 
-        self._time_lbl = QLabel("00:00:00", card)
-        self._time_lbl.setObjectName("TimeDigitsBig")
         tf = QFont(THEME.font_display)
         tf.setPixelSize(128)
         tf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 6.4)
-        self._time_lbl.setFont(tf)
-        self._time_lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self._time_lbl = _StopwatchLabel(tf, card)
+        self._time_lbl.setObjectName("TimeDigitsBig")
         self._time_lbl.setGeometry(178, 136, 320, 137)
 
         self._attempt_lbl = QLabel("Attempt 1", card)
@@ -184,7 +261,7 @@ class RecreateRhythmP2Page(FlowPage):
         self._attempt_lbl.setGeometry(563, 63, 320, 69)
 
         self._preview_btn = _PlayYourRhythmButton(card)
-        self._preview_btn.move(595, 152)
+        self._preview_btn.move(579, 152)
         self._preview_btn.clicked.connect(self._preview_own_rhythm)
 
         self._hint_lbl = QLabel("Press K to submit", card)
@@ -254,7 +331,7 @@ class RecreateRhythmP2Page(FlowPage):
         self._elapsed_ms = 0
         self._finished = False
         self._attempt_lbl.setText("Attempt 1")
-        self._time_lbl.setText(_format_ms(0))
+        self._set_time_ms(0)
         self._track.clear()
         self._status.setText("")
 
@@ -279,7 +356,6 @@ class RecreateRhythmP2Page(FlowPage):
             )
             self._strip_lbl.adjustSize()
             self._play_icon.setVisible(False)
-            self._play_vector.setVisible(False)
             self._strip.setCursor(Qt.CursorShape.ArrowCursor)
         else:
             self._hint_lbl.setText("Press K to submit")
@@ -290,7 +366,6 @@ class RecreateRhythmP2Page(FlowPage):
             )
             self._strip_lbl.adjustSize()
             self._play_icon.setVisible(True)
-            self._play_vector.setVisible(True)
             self._strip.setCursor(Qt.CursorShape.PointingHandCursor)
             role = self.flow.network_role
             if role == NetworkRole.HOST:
@@ -314,12 +389,12 @@ class RecreateRhythmP2Page(FlowPage):
     def _strip_clicked(self, _e: QMouseEvent) -> None:
         if self._is_local_spectator():
             return
-        self._session.play_reference()
+        self._session.play_reference(count_in_quarters=DEFAULT_COUNT_IN_QUARTERS)
 
     def _preview_own_rhythm(self) -> None:
         if self._is_local_spectator():
             return
-        self._session.play_current()
+        self._session.play_current(count_in_quarters=DEFAULT_COUNT_IN_QUARTERS)
 
     # ----- input -----------------------------------------------------------
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -329,7 +404,7 @@ class RecreateRhythmP2Page(FlowPage):
         if event.key() in (Qt.Key.Key_K, Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self._submit()
         elif event.key() == Qt.Key.Key_Space:
-            self._session.play_reference()
+            self._session.play_reference(count_in_quarters=DEFAULT_COUNT_IN_QUARTERS)
         else:
             super().keyPressEvent(event)
 
@@ -338,7 +413,10 @@ class RecreateRhythmP2Page(FlowPage):
         if self._match_start is None or self._finished:
             return
         self._elapsed_ms = int((time.monotonic() - self._match_start) * 1000)
-        self._time_lbl.setText(_format_ms(self._elapsed_ms))
+        self._set_time_ms(self._elapsed_ms)
+
+    def _set_time_ms(self, ms: int) -> None:
+        self._time_lbl.setText(_format_ms(ms))
 
     def _submit(self) -> None:
         if self._finished or self._is_local_spectator():
@@ -395,7 +473,7 @@ class RecreateRhythmP2Page(FlowPage):
         self._attempts = max(1, attempts)
         self._attempt_lbl.setText(f"Attempt {self._attempts}")
         self._elapsed_ms = max(0, elapsed_ms)
-        self._time_lbl.setText(_format_ms(self._elapsed_ms))
+        self._set_time_ms(self._elapsed_ms)
         # Re-anchor the spectator tick so the number keeps climbing smoothly
         # from the authoritative value instead of snapping backwards.
         self._match_start = time.monotonic() - (self._elapsed_ms / 1000.0)
@@ -425,7 +503,7 @@ class RecreateRhythmP2Page(FlowPage):
         self._attempts = max(1, attempts)
         self._attempt_lbl.setText(f"Attempt {self._attempts}")
         self._elapsed_ms = max(0, elapsed_ms)
-        self._time_lbl.setText(_format_ms(self._elapsed_ms))
+        self._set_time_ms(self._elapsed_ms)
         if not win:
             self._track.set_feedback([False] * SLOTS)
 

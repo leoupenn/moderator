@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from ...net import MSG_REQUEST_NAV
 from ...session import FlowState, GameMode, MultiplayerMode, NetworkRole
-from ...session.flow_state import RoundScore
+from ...session.flow_state import RoundScore, rr_recreator_player
 from ..theme import DESIGN_W, THEME
 from ..widgets import ChoiceButton, ChoiceStyle, DuckMascot, FlowPage
 
@@ -114,6 +114,7 @@ class ResultsPage(FlowPage):
 
         # Stash getters
         card.setProperty("_time_lbl", time_lbl)
+        card.setProperty("_att_host", att_host)
         card.setProperty("_att_lbl", att_val)
         return card
 
@@ -129,8 +130,10 @@ class ResultsPage(FlowPage):
             return
         latest: RoundScore = self.flow.scores[-1]
         p1_time = self._p1_card.property("_time_lbl")
+        p1_att_host = self._p1_card.property("_att_host")
         p1_att = self._p1_card.property("_att_lbl")
         p2_time = self._p2_card.property("_time_lbl")
+        p2_att_host = self._p2_card.property("_att_host")
         p2_att = self._p2_card.property("_att_lbl")
 
         p1_time.setText(_fmt_ms(latest.player1))
@@ -138,9 +141,23 @@ class ResultsPage(FlowPage):
         p1_att.setText(str(latest.attempts_p1))
         p2_att.setText(str(latest.attempts_p2))
 
+        p1_time.setVisible(True)
+        p1_att_host.setVisible(True)
+        p2_time.setVisible(True)
+        p2_att_host.setVisible(True)
+
         if self.flow.mode == GameMode.SINGLE:
             self._p2_card.setVisible(False)
             self._p2_duck.setVisible(False)
+        elif self.flow.multiplayer_mode == MultiplayerMode.RECREATE_RHYTHM:
+            self._p2_card.setVisible(True)
+            self._p2_duck.setVisible(True)
+            recreator = rr_recreator_player(self.flow.current_round)
+            show_p1 = recreator == 1
+            p1_time.setVisible(show_p1)
+            p1_att_host.setVisible(show_p1)
+            p2_time.setVisible(not show_p1)
+            p2_att_host.setVisible(not show_p1)
         else:
             self._p2_card.setVisible(True)
             self._p2_duck.setVisible(True)
