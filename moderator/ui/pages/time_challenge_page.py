@@ -63,7 +63,7 @@ from ...net import (
     MSG_SUBMIT,
     MSG_TIME_CHALLENGE_CONTROL,
 )
-from ...session import FlowState, GameMode, GameSession, NetworkRole
+from ...session import FlowState, GameMode, GameSession, Genre, NetworkRole
 from ...session.flow_state import LevelTier, RoundScore
 from ..theme import DESIGN_W, THEME
 from ..widgets import (
@@ -111,6 +111,17 @@ _LEVEL_PATTERNS: dict[LevelTier, List[List[int]]] = {
         [1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1],
         [1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0],
     ],
+}
+
+_SINGLE_PLAYER_GENRE_PATTERNS: dict[Genre, List[int]] = {
+    # Kpop / Medium / "ddu-ddu": 8th-8th-8th-rest-8th-8th-8th-rest.
+    Genre.KPOP: [1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0],
+    # Pop / Medium / "Flowers":
+    # quarter rest, 8th, 8th, 8th, quarter, 8th rest.
+    Genre.POP: [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0],
+    # Nursery Rhymes / Simple Genre / Easy / "Hot Cross Buns":
+    # quarter, quarter, half.
+    Genre.SIMPLE: [1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1],
 }
 
 
@@ -569,6 +580,11 @@ class TimeChallengePage(FlowPage):
     def _pick_pattern(self) -> List[int]:
         if self.flow.mode == GameMode.MULTI and self.flow.current_round == 1:
             return list(_MULTI_ROUND1_PRESET)
+        if (
+            self.flow.mode == GameMode.SINGLE
+            and self.flow.genre in _SINGLE_PLAYER_GENRE_PATTERNS
+        ):
+            return list(_SINGLE_PLAYER_GENRE_PATTERNS[self.flow.genre])
         choices = _LEVEL_PATTERNS.get(self.flow.level, _LEVEL_PATTERNS[LevelTier.NORMAL])
         if self.flow.mode == GameMode.SINGLE:
             return list(choices[0])

@@ -345,6 +345,7 @@ class MainWindow(QMainWindow):
     # ----- flow transitions ------------------------------------------------
     def _on_sp_genre_time_challenge(self, genre: Genre) -> None:
         """Single-player: genre picks Easy/Normal/Expert; one round then results."""
+        self._flow.genre = genre
         tier = level_tier_for_single_player_genre(genre)
         self._flow.level = tier
         self._flow.bpm = {
